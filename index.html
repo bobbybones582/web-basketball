@@ -138,7 +138,6 @@
             border: 2px solid #ff6a00;
         }
 
-        /* --- NEW VS CPU SCOREBUG --- */
         #scorebug-container {
             position: absolute;
             bottom: 20px;
@@ -453,7 +452,6 @@
     </div>
 
     <script type="module">
-        // Global safeguard for performance time to prevent any NaN physics breaking
         let lastFrameTime = window.performance ? window.performance.now() : Date.now();
         let gameHasStarted = false; 
 
@@ -465,13 +463,11 @@
         
         let myRole = null; 
         let roomId = null;
-        let lastShotTs = 0;
         let lastPosSync = 0;
         let lastClockSync = 0;
         let lastChargeSync = 0;
         let shotFallbackTimeout = null; 
 
-        // Let PeerJS auto-negotiate signaling host/ports natively while preserving STUN routing
         const PEER_OPTIONS = {
             debug: 1,
             config: {
@@ -497,11 +493,9 @@
         let lastShooter = null;
         let scoredThisPlay = false; 
 
-        // Multiplayer Stats Tracking
         let p1Stats = { pts: 0, fgM: 0, fgA: 0, fg3M: 0, fg3A: 0, ftM: 0, ftA: 0 };
         let p2Stats = { pts: 0, fgM: 0, fgA: 0, fg3M: 0, fg3A: 0, ftM: 0, ftA: 0 };
 
-        // Timeouts and Scoring Runs
         let p1Timeouts = 3;
         let p2Timeouts = 3;
         let homeScoringRun = 0;
@@ -512,23 +506,19 @@
         let lastTKeyPress = 0;
         let strobeLights = [];
 
-        // Fouls and Free Throws
         let isFreeThrow = false;
         let freeThrowsRemaining = 0;
         let totalFreeThrows = 0;
         let foulCalledThisShot = false;
 
-        // Clocks
         let quarter = 1;
         let gameClock = 90.0;
         let shotClock = 18.0;
         
-        // Pass Tracking
         let passProgress = 0;
         let passStartPos = new THREE.Vector3();
         let passTargetObj = null;
 
-        // CPU & Def State
         let defensiveStrategy = 'man'; 
         let defUpdateTimer = 0;
         let cpuShooting = { active: false, tmIdx: -1, power: 0, target: 0 };
@@ -536,20 +526,16 @@
         let keys = { w: false, a: false, s: false, d: false };
         let lastTouchX = 0, lastTouchY = 0;
         
-        // Celebrations
         let isCelebration = false;
         let celebrationTimer = 0;
 
-        // Zones & Coverage
         let currentZone = '3pt';
         let coverage = 0.0; 
         let lastVisualCoverage = -1; 
         let currentT3 = 0, currentT4 = 0; 
 
-        // InstaShoot (Catch & Shoot)
         let humanInsta = { timer: 0, ready: false, ring: null, lastReady: false };
 
-        // Pregame states
         let pregamePhase = 0; 
         let pregameStartTime = 0;
         let startAmbient = 0, startDir = 0, startFill = 0;
@@ -705,7 +691,6 @@
         }
 
         // --- MULTIPLAYER P2P FUNCTIONS ---
-        
         function createMultiplayerRoom() {
             document.getElementById('mp-status').innerText = "Creating room...";
             document.getElementById('btn-mp-create').disabled = true;
@@ -822,7 +807,7 @@
 
             let winnerText = "TIE GAME!";
             if (p1Stats.pts > p2Stats.pts) winnerText = "HOME WINS!";
-            else if (p2Stats.pts > p1Stats.pts) winnerText = "AWAY WINS!";
+            else if (p2Stats.pts > p2Stats.pts) winnerText = "AWAY WINS!";
 
             goScreen.innerHTML = `
                 <div style="background: rgba(17, 17, 24, 0.95); position: absolute; top:0; left:0; width:100%; height:100%; display:flex; flex-direction:column; justify-content:center; align-items:center; z-index:100; color:white; font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
@@ -1039,7 +1024,6 @@
             setTimeout(() => { meter.style.display = 'none'; }, 1000);
         }
 
-        // Initialize immediately
         init();
         setupLobby();
         applyMeterVisuals(currentZone);
@@ -1254,13 +1238,13 @@
                 if (k === 't' && gameMode === 'multiplayer' && possession === myRole && !isTimeout && !isFreeThrow) {
                     let myTimeouts = myRole === 'p1' ? p1Timeouts : p2Timeouts;
                     if (myTimeouts > 0) {
-                        let now = Date.now();
-                        if (now - lastTKeyPress < 2000) {
+                        let nowTime = Date.now();
+                        if (nowTime - lastTKeyPress < 2000) {
                             lastTKeyPress = 0;
                             if (conn && conn.open) conn.send({ type: 'action_timeout', caller: myRole });
                             triggerTimeout(myRole);
                         } else {
-                            lastTKeyPress = now;
+                            lastTKeyPress = nowTime;
                         }
                     }
                 }
@@ -1294,7 +1278,6 @@
         function updateScorebugUI() {
             if (gameMode === 'practice') return;
             
-            // Safety parsing
             score = parseInt(score) || 0;
             cpuScore = parseInt(cpuScore) || 0;
             
@@ -1380,7 +1363,7 @@
         function buildCourt(physicsMat) {
             const canvas = document.createElement('canvas'); canvas.width = 1024; canvas.height = 1024;
             const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#Cda57b'; ctx.fillRect(0, 0, 1024, 1024);
+            ctx.fillStyle = '#cda57b'; ctx.fillRect(0, 0, 1024, 1024);
             ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 10; ctx.strokeRect(362, 0, 300, 450);
             ctx.fillStyle = 'rgba(255, 100, 0, 0.2)'; ctx.fillRect(362, 0, 300, 450);
             ctx.beginPath(); ctx.arc(512, 450, 100, 0, Math.PI * 2); ctx.stroke();
@@ -1493,7 +1476,6 @@
         }
 
         // --- GAME LOGIC ---
-
         function triggerFoul(shooterRole, count) {
             gameState = 'resetting';
             isFreeThrow = true;
@@ -1657,13 +1639,13 @@
             if (pregamePhase === 1) {
                 const t = Math.min(elapsed / 3.5, 1);
                 ambientLight.intensity = startAmbient * (1 - t); dirLight.intensity = startDir * (1 - t); fillLight.intensity = startFill * (1 - t);
-                if (t === 1) { pregamePhase = 2; pregameStartTime = Date.now(); wristbandMesh.material = window.wristbandGlowMat; setSubtitle("🔊 [Crowd starts to cheer]"); setCrowdSound('cheer'); }
+                if (t === 1) { pregamePhase = 2; pregameStartTime = Date.now(); wristbandMesh.material = window.wristbandGlowMat; setSubtitle("📣 [Crowd starts to cheer]"); setCrowdSound('cheer'); }
             } else if (pregamePhase === 2) {
                 sparkleWristbands([0xffffff]);
-                if (elapsed >= 5) { pregamePhase = 3; pregameStartTime = Date.now(); setSubtitle("🔊 [Crowd boos loudly!]"); setCrowdSound('boo'); }
+                if (elapsed >= 5) { pregamePhase = 3; pregameStartTime = Date.now(); setSubtitle("📣 [Crowd boos loudly!]"); setCrowdSound('boo'); }
             } else if (pregamePhase === 3) {
                 sparkleWristbands([0xff0000, 0xffffff]);
-                if (elapsed >= 15) { pregamePhase = 4; pregameStartTime = Date.now(); setSubtitle("🔊 [Crowd cheers wildly!]"); setCrowdSound('wild'); }
+                if (elapsed >= 15) { pregamePhase = 4; pregameStartTime = Date.now(); setSubtitle("📣 [Crowd cheers wildly!]"); setCrowdSound('wild'); }
             } else if (pregamePhase === 4) {
                 sparkleWristbands([0xff0000, 0xffffff, 0x0000ff]);
                 if (elapsed >= 15) { pregamePhase = 5; pregameStartTime = Date.now(); setAllWristbands(0xffffff); setSubtitle(""); setCrowdSound('off'); }
@@ -1693,6 +1675,7 @@
             isFreeThrow = false;
             freeThrowsRemaining = 0;
             foulCalledThisShot = false;
+            wasAboveRim = false;
             
             if (gameMode === 'multiplayer') {
                 if (possession === myRole) {
@@ -1726,6 +1709,7 @@
             if (shotFallbackTimeout) { clearTimeout(shotFallbackTimeout); shotFallbackTimeout = null; }
             if (newPossession) possession = newPossession;
             foulCalledThisShot = false;
+            wasAboveRim = false;
 
             if (gameMode === 'multiplayer') {
                 if (possession === myRole) {
@@ -1751,8 +1735,8 @@
             humanInsta.ready = false; humanInsta.timer = 0;
             
             ballBody.velocity.set(0, 0, 0); ballBody.angularVelocity.set(0, 0, 0);
-            
             ballBody.position.set(0, 0.95, 4); 
+
             if (possession === 'player' || possession === myRole) {
                 camera.position.set(0, 1.8, 6);
                 camera.rotation.set(0, 0, 0);
@@ -2017,7 +2001,6 @@
         }
 
         // --- INPUT HANDLING ---
-
         function onMouseMove(event) {
             if (document.pointerLockElement !== document.body) return;
             if (gameState === 'lobby' || gameState === 'gameover') return; 
@@ -2064,7 +2047,6 @@
         }
 
         // --- UPDATE LOOP ---
-
         function checkScore() {
             const bx = ballBody.position.x; const by = ballBody.position.y; const bz = ballBody.position.z;
             const distFromCenter = Math.sqrt(bx*bx + (bz - RIM_Z)*(bz - RIM_Z));
@@ -2073,8 +2055,8 @@
             if (by > RIM_HEIGHT && isInsideRimXZ) wasAboveRim = true;
 
             if (wasAboveRim && by < RIM_HEIGHT && by > RIM_HEIGHT - 0.5 && isInsideRimXZ && ballBody.velocity.y < 0) {
-                const now = Date.now();
-                if (now - scoreLockTimer > 1000) {
+                const nowTime = Date.now();
+                if (nowTime - scoreLockTimer > 1000) {
                     if (shotFallbackTimeout) { clearTimeout(shotFallbackTimeout); shotFallbackTimeout = null; }
                     gameState = 'resetting'; 
                     let ptsAwarded = currentZone === '3pt' ? 3 : 2;
@@ -2121,17 +2103,17 @@
                     document.getElementById('score-value').innerText = score;
                     const flash = document.getElementById('score-flash');
                     flash.classList.add('show-flash'); setTimeout(() => flash.classList.remove('show-flash'), 800);
-                    scoreLockTimer = now; scoredThisPlay = true;
+                    scoreLockTimer = nowTime; scoredThisPlay = true;
                     
                     if (gameState !== 'pregame' && gameMode !== 'practice') { 
                         if (gameMode === 'multiplayer') {
                             if (lastShooter === 'p1') {
-                                isCelebration = true; celebrationTimer = now; setCrowdSound('cheer');
+                                isCelebration = true; celebrationTimer = nowTime; setCrowdSound('cheer');
                             } else {
                                 isCelebration = false; setCrowdSound('silence');
                             }
                         } else {
-                            isCelebration = true; celebrationTimer = now; setCrowdSound('cheer');
+                            isCelebration = true; celebrationTimer = nowTime; setCrowdSound('cheer');
                         }
                     }
                 }
@@ -2164,7 +2146,7 @@
             
             if (distRim > 6.5 && cov <= 0.5) {
                 pData.timer++;
-                if (pData.timer > 120) { pData.ready = true; if(pData.ring) pData.ring.material.opacity = 0.8; }
+                if (pData.timer > 120 && !pData.ready) { pData.ready = true; if(pData.ring) pData.ring.material.opacity = 0.8; }
             } else {
                 pData.timer = 0; pData.ready = false; if(pData.ring) pData.ring.material.opacity = 0;
             }
@@ -2174,10 +2156,9 @@
         function animate() {
             requestAnimationFrame(animate);
 
-            if (!lastFrameTime) lastFrameTime = window.performance ? window.performance.now() : Date.now();
-            let now = window.performance ? window.performance.now() : Date.now();
-            let dt = (now - lastFrameTime) / 1000;
-            lastFrameTime = now;
+            let nowTime = window.performance ? window.performance.now() : Date.now();
+            let dt = (nowTime - lastFrameTime) / 1000;
+            lastFrameTime = nowTime;
             if (dt > 0.1) dt = 0.1; 
 
             if (gameState === 'lobby') { renderer.render(scene, camera); return; }
@@ -2191,7 +2172,7 @@
                 document.getElementById('to-away-count').innerText = p2Timeouts;
 
                 if (timeoutMode === 'hype') {
-                    let t = now / 200;
+                    let t = nowTime / 200;
                     strobeLights.forEach((sl, idx) => {
                         sl.light.target.position.x = sl.baseTarget.x + Math.sin(t + idx) * 8;
                         sl.light.target.position.z = sl.baseTarget.z + Math.cos(t + idx) * 8;
@@ -2317,7 +2298,6 @@
                 else { isCelebration = false; setAllWristbands(0xffffff); }
             }
 
-            // True Rebounding Mechanics
             if (gameState === 'shooting' && !scoredThisPlay) {
                 if (gameMode === 'practice' || gameMode === 'vscpu') {
                     if (Math.abs(ballBody.position.x) > 15 || Math.abs(ballBody.position.z) > 15) {
@@ -2416,7 +2396,6 @@
                             }
                         }
                     } else if (gameMode === 'vscpu') {
-                        // AI moves towards ball mid-air!
                         const teamSpeed = 9.0 * dt; const redSpeed = 9.0 * dt; 
                         teammates.forEach((tm) => {
                             let mDir = new THREE.Vector3(ballBody.position.x - tm.body.position.x, 0, ballBody.position.z - tm.body.position.z);
@@ -2448,18 +2427,15 @@
                 }
             }
 
-            // Multiplayer Logic
             if (gameMode === 'multiplayer') {
                 updateOpponentLabel();
 
                 if (conn && conn.open) {
-                    // Sync Position fast
                     if (Date.now() - lastPosSync > 50) {
                         lastPosSync = Date.now();
                         conn.send({ type: 'sync_pos', x: camera.position.x, z: camera.position.z, ry: camera.rotation.y });
                     }
 
-                    // Periodic State Sync (Host)
                     if (isHost && gameState !== 'pregame' && Date.now() - lastClockSync > 1500) {
                         lastClockSync = Date.now();
                         conn.send({ 
@@ -2495,11 +2471,10 @@
                     }
                 }
 
-                if (gameState === 'aiming') { // My turn
+                if (gameState === 'aiming') { 
                     const forward = new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(0, camera.rotation.y, 0));
                     ballBody.position.set(camera.position.x + forward.x * 0.6, camera.position.y - 0.2, camera.position.z + forward.z * 0.6);
                     
-                    // Human vs Human Defensive Coverage Calculation
                     let bhFlat = new THREE.Vector3(camera.position.x, 0, camera.position.z);
                     let defFlat = new THREE.Vector3(opponentMesh.position.x, 0, opponentMesh.position.z);
                     let rimFlat = new THREE.Vector3(0, 0, RIM_Z);
@@ -2530,14 +2505,13 @@
                         document.getElementById('coverage-indicator').style.display = 'none';
                     }
 
-                } else if (gameState === 'spectating') { // Opponent's turn
+                } else if (gameState === 'spectating') { 
                     const oppDir = new THREE.Vector3(0,0,-1).applyEuler(new THREE.Euler(0, opponentMesh.rotation.y, 0));
                     ballBody.position.set(opponentMesh.position.x + oppDir.x * 0.6, 0.95, opponentMesh.position.z + oppDir.z * 0.6);
                     document.getElementById('coverage-indicator').style.display = 'none';
                 }
             }
 
-            // VS CPU Logic
             if (gameMode === 'vscpu' && gameState !== 'shooting' && !isTimeout) {
                 const teamSpeed = 9.0 * dt; const redSpeed = 9.0 * dt; 
                 const hoopPos = new THREE.Vector3(0, 0, RIM_Z);
@@ -2671,7 +2645,6 @@
                         def.mesh.position.copy(def.body.position);
                     });
                 } else {
-                    // Free Throw logic for CPU shooting
                     teammates.forEach((tm, idx) => {
                         const tmKey = 'teammate' + idx;
                         if (possession === tmKey && gameState === 'spectating') {
@@ -2783,15 +2756,13 @@
                 else if (power <= 0) { power = 0; powerDir = 1; }
                 updatePowerBar();
                 
-                // Stream charging status to opponent
                 if (gameMode === 'multiplayer' && conn && conn.open) {
-                    if (now - lastChargeSync > 50) {
-                        lastChargeSync = now;
+                    if (nowTime - lastChargeSync > 50) {
+                        lastChargeSync = nowTime;
                         conn.send({ type: 'sync_charge', power: power });
                     }
                 }
 
-                // High coverage foul check
                 if ((gameMode === 'multiplayer' || gameMode === 'vscpu') && coverage > 0.90 && !foulCalledThisShot && !isFreeThrow) {
                     foulCalledThisShot = true;
                     isCharging = false;
