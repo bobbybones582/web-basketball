@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Basketball</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #87CEEB; /* Sky blue background fallback */
+            user-select: none;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            pointer-events: none;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+        }
+        h1 {
+            margin: 0 0 5px 0;
+            font-size: 2.5rem;
+        }
+        p {
+            margin: 0 0 10px 0;
+            font-size: 1.2rem;
+        }
+        #scoreBoard {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #ffda75;
+        }
+        #powerBarContainer {
+            position: absolute;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 400px;
+            height: 25px;
+            background: rgba(0, 0, 0, 0.6);
+            border: 3px solid white;
+            border-radius: 15px;
+            overflow: hidden;
+            display: none;
+        }
+        #powerBar {
+            width: 0%;
+            height: 100%;
+            background: #ff3333;
+            transition: background-color 0.1s;
+        }
+        #instructions {
+            position: absolute;
+            bottom: 80px;
+            width: 100%;
+            text-align: center;
+            color: white;
+            font-size: 1.2rem;
+            text-shadow: 1px 1px 3px black;
+            pointer-events: none;
+        }
+    </style>
+    <!-- Load Three.js from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+    <div id="ui">
+        <h1>3D Hoops</h1>
+        <p>Score: <span id="scoreBoard">0</span></p>
+    </div>
+    
+    <div id="instructions">Click and hold to power up shot. Release to shoot! <br> (Click again to retrieve the ball)</div>
+
+    <div id="powerBarContainer">
+        <div id="powerBar"></div>
+    </div>
+
+    <script>
+        // --- SCENE SETUP ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB); // Sky
+        
+        // Add subtle fog to blend the horizon
+        scene.fog = new THREE.Fog(0x87CEEB, 15, 40);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 3.5, 10); // Positioned behind the ball
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        // --- LIGHTING ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+
+        const sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        sunLight.position.set(10, 20, 10);
+        sunLight.castShadow = true;
+        sunLight.shadow.mapSize.width = 2048;
+        sunLight.shadow.mapSize.height = 2048;
+        scene.add(sunLight);
+
+        // --- ENVIRONMENT BUILDER ---
+        
+        // 1. The Court
+        const courtGeo = new THREE.PlaneGeometry(30, 40);
+        const courtMat = new THREE.MeshStandardMaterial({ 
+            color: 0xdb9f67, // Hardwood color
+            roughness: 0.8 
+        });
+        const court = new THREE.Mesh(courtGeo, courtMat);
+        court.rotation.x = -Math.PI / 2;
+        court.receiveShadow = true;
+        scene.add(court);
+
+        // 2. The Backboard
+        const boardGeo = new THREE.BoxGeometry(3.6, 2.4, 0.1);
+        const boardMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 });
+        const board = new THREE.Mesh(boardGeo, boardMat);
+        board.position.set(0, 5, -8);
+        board.castShadow = true;
+        board.receiveShadow = true;
+        scene.add(board);
+
+        // Target square on backboard
+        const squareGeo = new THREE.PlaneGeometry(1.2, 0.9);
+        const squareMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+        const square = new THREE.Mesh(squareGeo, squareMat);
+        square.position.set(0, 5, -7.94); // Just slightly in front of the board
+        scene.add(square);
+
+        // 3. The Rim
+        const rimRadius = 0.6;
+        const rimGeo = new THREE.TorusGeometry(rimRadius, 0.05, 16, 32);
+        const rimMat = new THREE.MeshStandardMaterial({ color: 0xff3300, metalness: 0.5 });
+        const rim = new THREE.Mesh(rimGeo, rimMat);
+        rim.rotation.x = Math.PI / 2;
+        rim.position.set(0, 4.2, -7.3); // Attached below and in front of backboard
+        rim.castShadow = true;
+        scene.add(rim);
+
+        // 4. The Pole
+        const poleGeo = new THREE.CylinderGeometry(0.15, 0.15, 5);
+        const poleMat = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.8 });
+        const pole = new THREE.Mesh(poleGeo, poleMat);
+        pole.position.set(0, 2.5, -8.3);
+        pole.castShadow = true;
+        scene.add(pole);
+
+        // --- THE BALL ---
+        const ballRadius = 0.35;
+        const ballGeo = new THREE.SphereGeometry(ballRadius, 32, 32);
+        const ballMat = new THREE.MeshStandardMaterial({ 
+            color: 0xe66a10, // Orange
+            roughness: 0.6,
+            bounce: 0.8
+        });
+        const ball = new THREE.Mesh(ballGeo, ballMat);
+        ball.castShadow = true;
+        scene.add(ball);
+
+        // Setup lines on the basketball
+        const lineMat = new THREE.MeshBasicMaterial({ color: 0x222222 });
+        const lineGeo1 = new THREE.TorusGeometry(ballRadius + 0.01, 0.015, 8, 32);
+        const line1 = new THREE.Mesh(lineGeo1, lineMat);
+        const line2 = new THREE.Mesh(lineGeo1, lineMat);
+        line2.rotation.y = Math.PI / 2;
+        ball.add(line1);
+        ball.add(line2);
+
+        // --- GAME VARIABLES ---
+        const ballStartPos = new THREE.Vector3(0, 1.5, 6);
+        ball.position.copy(ballStartPos);
+
+        let velocity = new THREE.Vector3(0, 0, 0);
+        let isShooting = false;
+        let isAiming = false;
+        let power = 0;
+        let score = 0;
+        let canScore = false;
+        let ballRotationalVelocity = new THREE.Vector3(0,0,0);
+
+        // HTML Elements
+        const powerBar = document.getElementById('powerBar');
+        const powerContainer = document.getElementById('powerBarContainer');
+        const scoreBoard = document.getElementById('scoreBoard');
+        const instructions = document.getElementById('instructions');
+
+        // --- CONTROLS ---
+        window.addEventListener('mousedown', () => {
+            if (!isShooting) {
+                // Start aiming
+                isAiming = true;
+                power = 0;
+                powerContainer.style.display = 'block';
+                instructions.style.display = 'none';
+            } else if (ball.position.y < ballRadius + 0.1 && velocity.lengthSq() < 1) {
+                // Ball is resting on the ground, reset it
+                resetBall();
+            }
+        });
+
+        window.addEventListener('mouseup', () => {
+            if (isAiming) {
+                isAiming = false;
+                isShooting = true;
+                canScore = true;
+                powerContainer.style.display = 'none';
+                
+                // Calculate trajectory based on power
+                // Power ranges from 0 to 100. Let's map it to velocity.
+                const forwardForce = -8 - (power * 0.12); // Pushes ball into negative Z
+                const upwardForce = 8 + (power * 0.1);    // Pushes ball up into positive Y
+                
+                velocity.set(0, upwardForce, forwardForce);
+                
+                // Add some backspin
+                ballRotationalVelocity.set(-0.2, 0, 0);
+            }
+        });
+
+        // Touch support for mobile
+        window.addEventListener('touchstart', (e) => { e.preventDefault(); window.dispatchEvent(new Event('mousedown')); }, {passive: false});
+        window.addEventListener('touchend', (e) => { e.preventDefault(); window.dispatchEvent(new Event('mouseup')); }, {passive: false});
+
+        function resetBall() {
+            ball.position.copy(ballStartPos);
+            velocity.set(0, 0, 0);
+            ballRotationalVelocity.set(0, 0, 0);
+            ball.rotation.set(0, 0, 0);
+            isShooting = false;
+            canScore = false;
+            instructions.style.display = 'block';
+            instructions.innerHTML = "Click and hold to power up shot. Release to shoot!";
+        }
+
+        // --- PHYSICS & ANIMATION LOOP ---
+        const gravity = -22; 
+        const timeStep = 1 / 60; // Assume 60fps
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Handle Power Meter
+            if (isAiming) {
+                power += 1.8; // Speed of power bar filling
+                if (power > 100) power = 100; // Cap at 100
+                
+                powerBar.style.width = power + '%';
+                
+                // Color transition from green to yellow to red
+                let r, g;
+                if (power < 50) {
+                    r = Math.floor(255 * (power / 50));
+                    g = 255;
+                } else {
+                    r = 255;
+                    g = Math.floor(255 * ((100 - power) / 50));
+                }
+                powerBar.style.backgroundColor = `rgb(${r}, ${g}, 0)`;
+            }
+
+            // Handle Physics
+            if (isShooting) {
+                // Apply Gravity
+                velocity.y += gravity * timeStep;
+
+                // Move Ball
+                ball.position.addScaledVector(velocity, timeStep);
+
+                // Rotate Ball (Backspin)
+                ball.rotation.x += ballRotationalVelocity.x;
+
+                // 1. Floor Collision
+                if (ball.position.y <= ballRadius) {
+                    ball.position.y = ballRadius;
+                    velocity.y *= -0.7; // Bounce dampening
+                    velocity.z *= 0.8;  // Friction roll dampening
+                    velocity.x *= 0.8;
+                    ballRotationalVelocity.x *= 0.8; // Reduce spin
+                }
+
+                // 2. Backboard Collision
+                // Check if ball is within backboard X and Y bounds, and hits the Z plane
+                if (ball.position.z <= -7.9 + ballRadius && ball.position.z >= -8.1 - ballRadius) {
+                    if (ball.position.y >= 3.8 && ball.position.y <= 6.2 && Math.abs(ball.position.x) <= 1.8) {
+                        ball.position.z = -7.9 + ballRadius; // Snap to front of board
+                        velocity.z *= -0.4; // Bounce off the board (absorbs lots of energy)
+                    }
+                }
+
+                // 3. Rim Collision (simplified radial collision)
+                const distToRimCenter = new THREE.Vector2(ball.position.x, ball.position.z - (-7.3)).length();
+                if (Math.abs(ball.position.y - 4.2) < ballRadius && distToRimCenter > (rimRadius - ballRadius) && distToRimCenter < (rimRadius + ballRadius)) {
+                    // Reverse velocity away from center of rim
+                    const angle = Math.atan2(ball.position.z - (-7.3), ball.position.x);
+                    velocity.x = Math.cos(angle) * 3;
+                    velocity.z = Math.sin(angle) * 3;
+                    velocity.y *= -0.5;
+                }
+
+                // 4. Scoring Logic
+                // If ball is traveling downwards, passes through rim level, and is inside the hoop
+                if (canScore && velocity.y < 0 && ball.position.y < 4.2 && ball.position.y > 3.8) {
+                    if (distToRimCenter < rimRadius) {
+                        score++;
+                        scoreBoard.innerText = score;
+                        canScore = false; // Prevent multiple counts per shot
+                        
+                        // Flash background color to celebrate
+                        scene.background.setHex(0x90EE90); // Light green
+                        setTimeout(() => { scene.background.setHex(0x87CEEB); }, 300);
+                    }
+                }
+
+                // Retrieve prompt if ball rolls away
+                if (ball.position.z > 12 || ball.position.x > 15 || ball.position.x < -15) {
+                    instructions.style.display = 'block';
+                    instructions.innerHTML = "Ball went out of bounds. Click anywhere to reset.";
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+
+        // --- RESPONSIVE DESIGN ---
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
