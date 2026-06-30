@@ -62,6 +62,7 @@
             cursor: pointer;
             transition: all 0.2s;
             width: 350px;
+            pointer-events: auto;
         }
 
         .lobby-btn:hover:not(:disabled) {
@@ -93,6 +94,7 @@
             background: #222;
             color: white;
             text-transform: uppercase;
+            pointer-events: auto;
         }
 
         #mp-status {
@@ -1917,7 +1919,6 @@
             let isCovered = tmCov >= 0.3; 
             if (isCovered && Math.random() < 0.3 && !isFreeThrow) teammates[tmIdx].isFadeaway = true;
 
-            // Heavily boosted baseline conversion success parameters for deep paint looks
             let r = Math.random(); let pB = 0, pG = 0, pY = 0; 
             if (cpuZone === '3pt') { pB = isCovered ? 0.08 : 0.18; pG = isCovered ? 0.32 : 0.52; pY = isCovered ? 0.45 : 0.25; } 
             else if (cpuZone === 'paint') { pB = isCovered ? 0.25 : 0.45; pG = isCovered ? 0.45 : 0.45; pY = isCovered ? 0.25 : 0.08; } 
@@ -2417,7 +2418,6 @@
                             }
                         }
                     } else if (gameMode === 'vscpu') {
-                        // Smoothly guide players to tracking vector points during loose-ball scenario loops[cite: 1]
                         teammates.forEach((tm) => {
                             let target = new THREE.Vector3(ballBody.position.x, 0.95, ballBody.position.z);
                             tm.visualPos.lerp(target, 4.0 * dt);
@@ -2519,7 +2519,6 @@
                 }
             }
 
-            // --- REFACTORED 3v3 TACTICAL AI SYSTEM ---[cite: 1]
             if (gameMode === 'vscpu' && gameState !== 'shooting' && !isTimeout) {
                 const hoopPos = new THREE.Vector3(0, 0.95, RIM_Z);
                 const ballHandlerPos = new THREE.Vector3();
@@ -2529,7 +2528,6 @@
                 else if (possession === 'teammate1') ballHandlerPos.copy(teammates[1].body.position);
 
                 if (!isFreeThrow) {
-                    // 1. Off-Ball and On-Ball Offensive AI Flow[cite: 1]
                     teammates.forEach((tm, idx) => {
                         const tmKey = 'teammate' + idx;
 
@@ -2537,18 +2535,15 @@
                             if (!cpuShooting.active) {
                                 tm.stateTimer++;
                                 
-                                // Generate a deliberate drive towards the baseline rather than sporadic snapping loops[cite: 1]
                                 if (!tm.driveAngle || tm.stateTimer % 60 === 0) {
                                     tm.driveAngle = (Math.random() - 0.5) * (Math.PI * 0.4);
                                 }
                                 let hoopDir = new THREE.Vector3(0 - tm.body.position.x, 0, RIM_Z - tm.body.position.z).normalize();
                                 let driveDir = hoopDir.applyAxisAngle(new THREE.Vector3(0, 1, 0), tm.driveAngle);
                                 
-                                // Slowed down handling loops to a human-realistic stride speed[cite: 1]
                                 tm.targetPos.x += driveDir.x * (2.8 * dt);
                                 tm.targetPos.z += driveDir.z * (2.8 * dt);
 
-                                // Find nearest opponent boundary
                                 let nearestDefDist = 999; let nearestDefPos = null;
                                 defenders.forEach(d => { let dist = tm.body.position.distanceTo(d.body.position); if(dist < nearestDefDist) { nearestDefDist = dist; nearestDefPos = d.body.position; } });
                                 let tmFlat = new THREE.Vector3(tm.body.position.x, 0, tm.body.position.z); let defFlat = new THREE.Vector3(nearestDefPos.x, 0, nearestDefPos.z); let rimFlat = new THREE.Vector3(0, 0, RIM_Z);
@@ -2568,25 +2563,23 @@
                                         startCpuShot(idx, tmCov);
                                     }
                                 } else if (distRim < 4.0 && isWideOpen) {
-                                    startCpuShot(idx, tmCov); // Take high-efficiency wide open point-blank layups
+                                    startCpuShot(idx, tmCov);
                                 } else if (tm.instaShoot.ready && isWideOpen) {
-                                    startCpuShot(idx, tmCov); // Catch and shoot immediate conversion
+                                    startCpuShot(idx, tmCov);
                                 } else if (tm.stateTimer > 75 && isWideOpen) {
                                     startCpuShot(idx, tmCov);
                                 } else if (tm.stateTimer > 120 || isContested) { 
-                                    // Structured kick-out passing mechanics to look for space[cite: 1]
                                     let targets = ['player']; if (idx === 0) targets.push('teammate1'); else targets.push('teammate0');
                                     startPass(targets[Math.floor(Math.random() * targets.length)]);
                                 }
                             }
                         } else if (possession !== tmKey) {
-                            // Off-ball behavior tree tracking space patterns[cite: 1]
                             tm.stateTimer -= dt * 60;
                             if (tm.stateTimer <= 0) {
                                 const r = Math.random();
-                                if (r < 0.5) tm.state = 'arc';       // Relocate behind the 3PT line[cite: 1]
-                                else if (r < 0.8) tm.state = 'cut';  // Smooth slash down the lane
-                                else tm.state = 'screen';            // Pin down off-ball screen assignment
+                                if (r < 0.5) tm.state = 'arc';       
+                                else if (r < 0.8) tm.state = 'cut';  
+                                else tm.state = 'screen';            
                                 tm.stateTimer = 140 + Math.random() * 100; 
                                 if (tm.state === 'arc') tm.targetAngle = Math.PI * 0.15 + Math.random() * (Math.PI * 0.7);
                             }
@@ -2596,11 +2589,10 @@
                             } else if (tm.state === 'cut') { 
                                 tm.targetPos.set((Math.random() - 0.5) * 3, 0.95, RIM_Z + 2.5); 
                             } else if (tm.state === 'screen') { 
-                                targetPos.copy(ballHandlerPos).add(new THREE.Vector3(idx == 0 ? 1.5 : -1.5, 0, 0.8)); 
+                                tm.targetPos.copy(ballHandlerPos).add(new THREE.Vector3(idx == 0 ? 1.5 : -1.5, 0, 0.8)); 
                             }
                         }
                         
-                        // Human-realistic bounding speed clamps using smooth interpolation loops[cite: 1]
                         tm.visualPos.lerp(tm.targetPos, 2.5 * dt);
                         tm.body.position.copy(tm.visualPos);
                         
@@ -2609,7 +2601,6 @@
                         tm.mesh.position.copy(tm.body.position);
                     });
 
-                    // 2. Continuous Proximity Recovery Defense Loop[cite: 1]
                     let marks = [camera.position, teammates[0].mesh.position, teammates[1].mesh.position];
                     let handlerIdx = (possession === 'player') ? 0 : ((possession === 'teammate0') ? 1 : 2);
                     let ballDistToHoop = ballHandlerPos.distanceTo(hoopPos);
@@ -2619,27 +2610,22 @@
                         let isGuardingHandler = (i === handlerIdx);
 
                         if (isGuardingHandler) {
-                            // On-ball defender squares up along the path line to the hoop[cite: 1]
                             let dirToHoop = hoopPos.clone().sub(myMark).normalize();
                             def.targetPos.copy(myMark).add(dirToHoop.multiplyScalar(1.1));
-                            def.speedModifier = 3.8; // On-ball closing stride intensity[cite: 1]
+                            def.speedModifier = 3.8; 
                         } else {
-                            // Off-ball team defense: implementation of dynamic recovery and help structures[cite: 1]
                             let distMarkToHoop = myMark.distanceTo(hoopPos);
                             
                             if (ballDistToHoop < 4.8 && distMarkToHoop > 5.5 && Math.random() < 0.6) {
-                                // HELP DEFENSE: Drop down to clog the interior lanes if baseline drives occur[cite: 1]
                                 let helpVector = ballHandlerPos.clone().add(hoopPos).multiplyScalar(0.5);
                                 def.targetPos.copy(helpVector);
-                                def.speedModifier = 2.4;[cite: 1]
+                                def.speedModifier = 2.4;
                             } else {
-                                // RECOVERY: Stick into passing lanes between mark assignment and rim[cite: 1]
                                 def.targetPos.copy(myMark).lerp(hoopPos, 0.28);
-                                def.speedModifier = 2.2;[cite: 1]
+                                def.speedModifier = 2.2;
                             }
                         }
 
-                        // Apply structured acceleration weights to the dynamic vector transformations[cite: 1]
                         def.visualPos.lerp(def.targetPos, def.speedModifier * dt);
                         def.body.position.copy(def.visualPos);
                         
@@ -2648,7 +2634,6 @@
                         def.mesh.position.copy(def.body.position);
                     });
                 } else {
-                    // Free Throw scenario handling bounds loops
                     teammates.forEach((tm, idx) => {
                         const tmKey = 'teammate' + idx;
                         if (possession === tmKey && gameState === 'spectating') {
@@ -2662,7 +2647,6 @@
                     });
                 }
 
-                // Coverage assessment indexing matching the active handler assignment
                 let activeDefIdx = (possession === 'player') ? 0 : (possession === 'teammate0' ? 1 : 2);
                 let defenderPos = defenders[activeDefIdx].body.position;
                 let bhFlat = new THREE.Vector3(ballHandlerPos.x, 0, ballHandlerPos.z); let defFlat = new THREE.Vector3(defenderPos.x, 0, defenderPos.z); let rimFlat = new THREE.Vector3(0, 0, RIM_Z);
