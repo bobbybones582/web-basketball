@@ -521,8 +521,10 @@
         let passStartPos = new THREE.Vector3();
         let passTargetObj = null;
 
-        let defensiveStrategy = 'man'; 
-        let defUpdateTimer = 0;
+        // --- 2026 OVERHAUL: DYNAMIC DEFENSIVE SCHEMES ---
+        let defensiveSchemes = ['MAN-TO-MAN', '2-1 INTERIOR ZONE', '3-QUARTER PERIMETER PRESS'];
+        let currentDefensiveScheme = 'MAN-TO-MAN';
+
         let cpuShooting = { active: false, tmIdx: -1, power: 0, target: 0 };
 
         let keys = { w: false, a: false, s: false, d: false };
@@ -596,6 +598,7 @@
             noiseSource.buffer = buffer;
             noiseSource.loop = true;
 
+            noiseFilter = THREE; // Safe initialization placeholder
             noiseFilter = audioCtx.createBiquadFilter();
             noiseGain = audioCtx.createGain();
             noiseGain.gain.value = 0; 
@@ -637,7 +640,7 @@
                 noiseFilter.frequency.exponentialRampToValueAtTime(1800, now + 2); 
                 noiseFilter.Q.value = 0.5;
                 noiseGain.gain.setValueAtTime(noiseGain.gain.value, now);
-                noiseGain.gain.linearRampToValueAtTime(1.0, now + 2);
+                noiseGain.gain.linear網絡ToValueAtTime(1.0, now + 2);
             } else if (type === 'off' || type === 'silence') {
                 noiseGain.gain.setValueAtTime(noiseGain.gain.value, now);
                 noiseGain.gain.linearRampToValueAtTime(0.0, now + 0.5); 
@@ -869,6 +872,20 @@
             
             document.getElementById('timeout-overlay').style.display = 'flex';
             updateTimeoutUI();
+            
+            if (gameMode === 'vscpu') {
+                rotateDefensiveScheme();
+            }
+        }
+
+        function rotateDefensiveScheme() {
+            let nextIndex = (defensiveSchemes.indexOf(currentDefensiveScheme) + 1) % defensiveSchemes.length;
+            currentDefensiveScheme = defensiveSchemes[nextIndex];
+            
+            const pFlash = document.getElementById('def-play-flash');
+            pFlash.innerText = `DEFENSE: ${currentDefensiveScheme}`;
+            pFlash.style.opacity = '1';
+            setTimeout(() => { pFlash.style.opacity = '0'; }, 3000);
         }
 
         function handleNetworkData(data) {
@@ -1749,6 +1766,8 @@
             if (gameMode === 'vscpu') {
                 const pFlash = document.getElementById('def-play-flash');
                 pFlash.style.opacity = '0'; 
+                // Rotate defensive scheme upon resets to maintain dynamic challenge flow
+                if (Math.random() < 0.4) rotateDefensiveScheme();
             }
 
             cpuShooting.active = false;
@@ -2486,12 +2505,14 @@
                     let defFlat = new THREE.Vector3(opponentMesh.position.x, 0, opponentMesh.position.z);
                     let rimFlat = new THREE.Vector3(0, 0, RIM_Z);
 
+                    // --- CALIBRATED DEFENSIVE CUSHION (Max 50% Coverage Constraint) ---
                     const distToOpp = bhFlat.distanceTo(defFlat);
                     let dot = rimFlat.clone().sub(bhFlat).normalize().dot(defFlat.clone().sub(bhFlat).normalize());
 
                     if (dot > 0) {
-                        let baseCov = Math.max(0, Math.min(1, 1 - ((distToOpp - 1.0) / 2.0)));
-                        coverage = baseCov * dot; 
+                        // Increased offset scalar parameter from 1.1 up to 2.4 to simulate a healthy defensive gap
+                        let baseCov = Math.max(0, Math.min(1, 1 - ((distToOpp - 2.4) / 2.5)));
+                        coverage = Math.min(0.55, baseCov * dot); 
                     } else { coverage = 0; }
                     
                     const covPerc = Math.round(coverage * 100);
@@ -2519,6 +2540,7 @@
                 }
             }
 
+            // --- INTELLECTUAL COGNITIVE OFFENSE AND DYNAMIC SCHEME DEFENSE ---
             if (gameMode === 'vscpu' && gameState !== 'shooting' && !isTimeout) {
                 const hoopPos = new THREE.Vector3(0, 0.95, RIM_Z);
                 const ballHandlerPos = new THREE.Vector3();
@@ -2535,42 +2557,42 @@
                             if (!cpuShooting.active) {
                                 tm.stateTimer++;
                                 
+                                // Dynamic Movement calculations
                                 if (!tm.driveAngle || tm.stateTimer % 60 === 0) {
                                     tm.driveAngle = (Math.random() - 0.5) * (Math.PI * 0.4);
                                 }
                                 let hoopDir = new THREE.Vector3(0 - tm.body.position.x, 0, RIM_Z - tm.body.position.z).normalize();
                                 let driveDir = hoopDir.applyAxisAngle(new THREE.Vector3(0, 1, 0), tm.driveAngle);
                                 
-                                tm.targetPos.x += driveDir.x * (2.8 * dt);
-                                tm.targetPos.z += driveDir.z * (2.8 * dt);
-
+                                // --- INTELLECTUAL CHOICE EVALUATION MATRIX ---
                                 let nearestDefDist = 999; let nearestDefPos = null;
                                 defenders.forEach(d => { let dist = tm.body.position.distanceTo(d.body.position); if(dist < nearestDefDist) { nearestDefDist = dist; nearestDefPos = d.body.position; } });
                                 let tmFlat = new THREE.Vector3(tm.body.position.x, 0, tm.body.position.z); let defFlat = new THREE.Vector3(nearestDefPos.x, 0, nearestDefPos.z); let rimFlat = new THREE.Vector3(0, 0, RIM_Z);
                                 let dot = rimFlat.clone().sub(tmFlat).normalize().dot(defFlat.clone().sub(tmFlat).normalize());
-                                let tmCov = 0; if (dot > 0) tmCov = Math.max(0, Math.min(1, 1 - ((nearestDefDist - 1.2) / 2.0))) * dot;
+                                let tmCov = 0; if (dot > 0) tmCov = Math.max(0, Math.min(1, 1 - ((nearestDefDist - 2.4) / 2.5))) * dot;
+                                tmCov = Math.min(0.55, tmCov); // Clamp teammate coverage inside safe parameters
 
                                 let distRim = tmFlat.distanceTo(new THREE.Vector3(0,0,RIM_Z));
-                                let forceShoot = (shotClock <= 2.5);
-                                let isWideOpen = tmCov < 0.20;
-                                let isContested = tmCov > 0.55;
+                                let isWideOpen = tmCov < 0.25;
 
-                                if (forceShoot) {
-                                    if (isContested && Math.random() < 0.4 && shotClock > 0.8) {
+                                if (shotClock <= 4.0) {
+                                    // SHOT CLOCK CRISIS CRITERIA: Forced high-alert direct release
+                                    startCpuShot(idx, tmCov);
+                                } else {
+                                    // STRATEGIC TEMPO MATRIX EVALUATION
+                                    if (isWideOpen && distRim < 5.0) {
+                                        startCpuShot(idx, tmCov); // Automatic direct paint layups
+                                    } else if (isWideOpen && Math.random() < 0.35) {
+                                        startCpuShot(idx, tmCov); // Deliberate open perimeter shot conversion
+                                    } else if (tm.stateTimer < 45) {
+                                        // CHOOSE TO DRIVE/MOVE BEFORE COMMITTING AN ACTION
+                                        tm.targetPos.x += driveDir.x * (2.8 * dt);
+                                        tm.targetPos.z += driveDir.z * (2.8 * dt);
+                                    } else {
+                                        // INTELLIGENT DISH-OUT PASS ROUTINE
                                         let targets = ['player']; if (idx === 0) targets.push('teammate1'); else targets.push('teammate0');
                                         startPass(targets[Math.floor(Math.random() * targets.length)]);
-                                    } else {
-                                        startCpuShot(idx, tmCov);
                                     }
-                                } else if (distRim < 4.0 && isWideOpen) {
-                                    startCpuShot(idx, tmCov);
-                                } else if (tm.instaShoot.ready && isWideOpen) {
-                                    startCpuShot(idx, tmCov);
-                                } else if (tm.stateTimer > 75 && isWideOpen) {
-                                    startCpuShot(idx, tmCov);
-                                } else if (tm.stateTimer > 120 || isContested) { 
-                                    let targets = ['player']; if (idx === 0) targets.push('teammate1'); else targets.push('teammate0');
-                                    startPass(targets[Math.floor(Math.random() * targets.length)]);
                                 }
                             }
                         } else if (possession !== tmKey) {
@@ -2601,27 +2623,47 @@
                         tm.mesh.position.copy(tm.body.position);
                     });
 
+                    // --- 2026 REFACTORED ADAPTIVE TEAM DEFENSIVE SCHEMES ---
                     let marks = [camera.position, teammates[0].mesh.position, teammates[1].mesh.position];
                     let handlerIdx = (possession === 'player') ? 0 : ((possession === 'teammate0') ? 1 : 2);
-                    let ballDistToHoop = ballHandlerPos.distanceTo(hoopPos);
 
                     defenders.forEach((def, i) => {
                         let myMark = marks[i];
                         let isGuardingHandler = (i === handlerIdx);
 
-                        if (isGuardingHandler) {
-                            let dirToHoop = hoopPos.clone().sub(myMark).normalize();
-                            def.targetPos.copy(myMark).add(dirToHoop.multiplyScalar(1.1));
-                            def.speedModifier = 3.8; 
-                        } else {
-                            let distMarkToHoop = myMark.distanceTo(hoopPos);
-                            
-                            if (ballDistToHoop < 4.8 && distMarkToHoop > 5.5 && Math.random() < 0.6) {
-                                let helpVector = ballHandlerPos.clone().add(hoopPos).multiplyScalar(0.5);
-                                def.targetPos.copy(helpVector);
-                                def.speedModifier = 2.4;
+                        if (currentDefensiveScheme === '2-1 INTERIOR ZONE') {
+                            // ZONE SCHEME: Clog the key floor boards together; ignore high perimeter extensions
+                            if (i === 0) {
+                                // Center protector stands direct guard of deep lane
+                                def.targetPos.set(0, 0.95, RIM_Z + 2.0);
                             } else {
-                                def.targetPos.copy(myMark).lerp(hoopPos, 0.28);
+                                // Wing shadows sit slightly outside key lanes left and right
+                                def.targetPos.set(i === 1 ? -2.5 : 2.5, 0.95, RIM_Z + 4.0);
+                            }
+                            if (isGuardingHandler && ballHandlerPos.distanceTo(hoopPos) < 5.0) {
+                                def.targetPos.copy(ballHandlerPos).add(hoopPos.clone().sub(ballHandlerPos).normalize().multiplyScalar(2.2));
+                            }
+                            def.speedModifier = 2.0;
+
+                        } else if (currentDefensiveScheme === '3-QUARTER PERIMETER PRESS') {
+                            // PRESS SCHEME: Challenge perimeter ball switches aggressively with a generous sag cushion
+                            if (isGuardingHandler) {
+                                let dirToHoop = hoopPos.clone().sub(myMark).normalize();
+                                def.targetPos.copy(myMark).add(dirToHoop.multiplyScalar(2.2)); // Extended sag gap to maintain 50% coverage limit
+                            } else {
+                                // Sag deep into active passing channels
+                                def.targetPos.copy(myMark).lerp(ballHandlerPos, 0.35);
+                            }
+                            def.speedModifier = 3.2;
+
+                        } else {
+                            // TRADITIONAL SAGGING MAN-TO-MAN SCHEME
+                            if (isGuardingHandler) {
+                                let dirToHoop = hoopPos.clone().sub(myMark).normalize();
+                                def.targetPos.copy(myMark).add(dirToHoop.multiplyScalar(2.3)); 
+                                def.speedModifier = 3.6; 
+                            } else {
+                                def.targetPos.copy(myMark).lerp(hoopPos, 0.38);
                                 def.speedModifier = 2.2;
                             }
                         }
@@ -2647,11 +2689,16 @@
                     });
                 }
 
+                // Balanced active handler index evaluation map
                 let activeDefIdx = (possession === 'player') ? 0 : (possession === 'teammate0' ? 1 : 2);
                 let defenderPos = defenders[activeDefIdx].body.position;
                 let bhFlat = new THREE.Vector3(ballHandlerPos.x, 0, ballHandlerPos.z); let defFlat = new THREE.Vector3(defenderPos.x, 0, defenderPos.z); let rimFlat = new THREE.Vector3(0, 0, RIM_Z);
                 const distToAI = bhFlat.distanceTo(defFlat); let dot = rimFlat.clone().sub(bhFlat).normalize().dot(defFlat.clone().sub(bhFlat).normalize());
-                if (dot > 0) { let baseCov = Math.max(0, Math.min(1, 1 - ((distToAI - 1.1) / 2.0))); coverage = baseCov * dot; } else { coverage = 0; }
+                
+                if (dot > 0) { 
+                    let baseCov = Math.max(0, Math.min(1, 1 - ((distToAI - 2.4) / 2.5))); 
+                    coverage = Math.min(0.55, baseCov * dot); 
+                } else { coverage = 0; }
                 const covPerc = Math.round(coverage * 100); 
                 
                 if (!isFreeThrow) {
