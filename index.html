@@ -521,7 +521,7 @@
         let passStartPos = new THREE.Vector3();
         let passTargetObj = null;
 
-        // --- 2026 OVERHAUL: DYNAMIC DEFENSIVE SCHEMES ---
+        // --- DEFENSIVE PALETTE INTERFACE ---
         let defensiveSchemes = ['MAN-TO-MAN', '2-1 INTERIOR ZONE', '3-QUARTER PERIMETER PRESS'];
         let currentDefensiveScheme = 'MAN-TO-MAN';
 
@@ -598,7 +598,6 @@
             noiseSource.buffer = buffer;
             noiseSource.loop = true;
 
-            noiseFilter = THREE; // Safe initialization placeholder
             noiseFilter = audioCtx.createBiquadFilter();
             noiseGain = audioCtx.createGain();
             noiseGain.gain.value = 0; 
@@ -640,7 +639,7 @@
                 noiseFilter.frequency.exponentialRampToValueAtTime(1800, now + 2); 
                 noiseFilter.Q.value = 0.5;
                 noiseGain.gain.setValueAtTime(noiseGain.gain.value, now);
-                noiseGain.gain.linear網絡ToValueAtTime(1.0, now + 2);
+                noiseGain.gain.linearRampToValueAtTime(1.0, now + 2);
             } else if (type === 'off' || type === 'silence') {
                 noiseGain.gain.setValueAtTime(noiseGain.gain.value, now);
                 noiseGain.gain.linearRampToValueAtTime(0.0, now + 0.5); 
@@ -1766,7 +1765,6 @@
             if (gameMode === 'vscpu') {
                 const pFlash = document.getElementById('def-play-flash');
                 pFlash.style.opacity = '0'; 
-                // Rotate defensive scheme upon resets to maintain dynamic challenge flow
                 if (Math.random() < 0.4) rotateDefensiveScheme();
             }
 
@@ -2505,12 +2503,10 @@
                     let defFlat = new THREE.Vector3(opponentMesh.position.x, 0, opponentMesh.position.z);
                     let rimFlat = new THREE.Vector3(0, 0, RIM_Z);
 
-                    // --- CALIBRATED DEFENSIVE CUSHION (Max 50% Coverage Constraint) ---
                     const distToOpp = bhFlat.distanceTo(defFlat);
                     let dot = rimFlat.clone().sub(bhFlat).normalize().dot(defFlat.clone().sub(bhFlat).normalize());
 
                     if (dot > 0) {
-                        // Increased offset scalar parameter from 1.1 up to 2.4 to simulate a healthy defensive gap
                         let baseCov = Math.max(0, Math.min(1, 1 - ((distToOpp - 2.4) / 2.5)));
                         coverage = Math.min(0.55, baseCov * dot); 
                     } else { coverage = 0; }
@@ -2540,7 +2536,6 @@
                 }
             }
 
-            // --- INTELLECTUAL COGNITIVE OFFENSE AND DYNAMIC SCHEME DEFENSE ---
             if (gameMode === 'vscpu' && gameState !== 'shooting' && !isTimeout) {
                 const hoopPos = new THREE.Vector3(0, 0.95, RIM_Z);
                 const ballHandlerPos = new THREE.Vector3();
@@ -2557,39 +2552,33 @@
                             if (!cpuShooting.active) {
                                 tm.stateTimer++;
                                 
-                                // Dynamic Movement calculations
                                 if (!tm.driveAngle || tm.stateTimer % 60 === 0) {
                                     tm.driveAngle = (Math.random() - 0.5) * (Math.PI * 0.4);
                                 }
                                 let hoopDir = new THREE.Vector3(0 - tm.body.position.x, 0, RIM_Z - tm.body.position.z).normalize();
                                 let driveDir = hoopDir.applyAxisAngle(new THREE.Vector3(0, 1, 0), tm.driveAngle);
                                 
-                                // --- INTELLECTUAL CHOICE EVALUATION MATRIX ---
                                 let nearestDefDist = 999; let nearestDefPos = null;
                                 defenders.forEach(d => { let dist = tm.body.position.distanceTo(d.body.position); if(dist < nearestDefDist) { nearestDefDist = dist; nearestDefPos = d.body.position; } });
                                 let tmFlat = new THREE.Vector3(tm.body.position.x, 0, tm.body.position.z); let defFlat = new THREE.Vector3(nearestDefPos.x, 0, nearestDefPos.z); let rimFlat = new THREE.Vector3(0, 0, RIM_Z);
                                 let dot = rimFlat.clone().sub(tmFlat).normalize().dot(defFlat.clone().sub(tmFlat).normalize());
                                 let tmCov = 0; if (dot > 0) tmCov = Math.max(0, Math.min(1, 1 - ((nearestDefDist - 2.4) / 2.5))) * dot;
-                                tmCov = Math.min(0.55, tmCov); // Clamp teammate coverage inside safe parameters
+                                tmCov = Math.min(0.55, tmCov); 
 
                                 let distRim = tmFlat.distanceTo(new THREE.Vector3(0,0,RIM_Z));
                                 let isWideOpen = tmCov < 0.25;
 
                                 if (shotClock <= 4.0) {
-                                    // SHOT CLOCK CRISIS CRITERIA: Forced high-alert direct release
                                     startCpuShot(idx, tmCov);
                                 } else {
-                                    // STRATEGIC TEMPO MATRIX EVALUATION
                                     if (isWideOpen && distRim < 5.0) {
-                                        startCpuShot(idx, tmCov); // Automatic direct paint layups
+                                        startCpuShot(idx, tmCov); 
                                     } else if (isWideOpen && Math.random() < 0.35) {
-                                        startCpuShot(idx, tmCov); // Deliberate open perimeter shot conversion
+                                        startCpuShot(idx, tmCov); 
                                     } else if (tm.stateTimer < 45) {
-                                        // CHOOSE TO DRIVE/MOVE BEFORE COMMITTING AN ACTION
                                         tm.targetPos.x += driveDir.x * (2.8 * dt);
                                         tm.targetPos.z += driveDir.z * (2.8 * dt);
                                     } else {
-                                        // INTELLIGENT DISH-OUT PASS ROUTINE
                                         let targets = ['player']; if (idx === 0) targets.push('teammate1'); else targets.push('teammate0');
                                         startPass(targets[Math.floor(Math.random() * targets.length)]);
                                     }
@@ -2623,21 +2612,18 @@
                         tm.mesh.position.copy(tm.body.position);
                     });
 
-                    // --- 2026 REFACTORED ADAPTIVE TEAM DEFENSIVE SCHEMES ---
                     let marks = [camera.position, teammates[0].mesh.position, teammates[1].mesh.position];
                     let handlerIdx = (possession === 'player') ? 0 : ((possession === 'teammate0') ? 1 : 2);
+                    let ballDistToHoop = ballHandlerPos.distanceTo(hoopPos);
 
                     defenders.forEach((def, i) => {
                         let myMark = marks[i];
                         let isGuardingHandler = (i === handlerIdx);
 
                         if (currentDefensiveScheme === '2-1 INTERIOR ZONE') {
-                            // ZONE SCHEME: Clog the key floor boards together; ignore high perimeter extensions
                             if (i === 0) {
-                                // Center protector stands direct guard of deep lane
                                 def.targetPos.set(0, 0.95, RIM_Z + 2.0);
                             } else {
-                                // Wing shadows sit slightly outside key lanes left and right
                                 def.targetPos.set(i === 1 ? -2.5 : 2.5, 0.95, RIM_Z + 4.0);
                             }
                             if (isGuardingHandler && ballHandlerPos.distanceTo(hoopPos) < 5.0) {
@@ -2646,18 +2632,15 @@
                             def.speedModifier = 2.0;
 
                         } else if (currentDefensiveScheme === '3-QUARTER PERIMETER PRESS') {
-                            // PRESS SCHEME: Challenge perimeter ball switches aggressively with a generous sag cushion
                             if (isGuardingHandler) {
                                 let dirToHoop = hoopPos.clone().sub(myMark).normalize();
-                                def.targetPos.copy(myMark).add(dirToHoop.multiplyScalar(2.2)); // Extended sag gap to maintain 50% coverage limit
+                                def.targetPos.copy(myMark).add(dirToHoop.multiplyScalar(2.2)); 
                             } else {
-                                // Sag deep into active passing channels
                                 def.targetPos.copy(myMark).lerp(ballHandlerPos, 0.35);
                             }
                             def.speedModifier = 3.2;
 
                         } else {
-                            // TRADITIONAL SAGGING MAN-TO-MAN SCHEME
                             if (isGuardingHandler) {
                                 let dirToHoop = hoopPos.clone().sub(myMark).normalize();
                                 def.targetPos.copy(myMark).add(dirToHoop.multiplyScalar(2.3)); 
@@ -2689,7 +2672,6 @@
                     });
                 }
 
-                // Balanced active handler index evaluation map
                 let activeDefIdx = (possession === 'player') ? 0 : (possession === 'teammate0' ? 1 : 2);
                 let defenderPos = defenders[activeDefIdx].body.position;
                 let bhFlat = new THREE.Vector3(ballHandlerPos.x, 0, ballHandlerPos.z); let defFlat = new THREE.Vector3(defenderPos.x, 0, defenderPos.z); let rimFlat = new THREE.Vector3(0, 0, RIM_Z);
