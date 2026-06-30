@@ -521,7 +521,6 @@
         let passStartPos = new THREE.Vector3();
         let passTargetObj = null;
 
-        // --- DEFENSIVE PALETTE INTERFACE ---
         let defensiveSchemes = ['MAN-TO-MAN', '2-1 INTERIOR ZONE', '3-QUARTER PERIMETER PRESS'];
         let currentDefensiveScheme = 'MAN-TO-MAN';
 
@@ -1160,15 +1159,6 @@
             }
         }
 
-        function createInstaRing() {
-            const geo = new THREE.TorusGeometry(0.5, 0.08, 8, 24);
-            const mat = new THREE.MeshBasicMaterial({ color: 0xffff00, transparent: true, opacity: 0 });
-            const mesh = new THREE.Mesh(geo, mat);
-            mesh.rotation.x = Math.PI / 2;
-            scene.add(mesh);
-            return mesh;
-        }
-
         function init() {
             const container = document.getElementById('game-container');
             scene = new THREE.Scene();
@@ -1236,8 +1226,6 @@
             buildPlayers(hardMaterial);
             createBall(bouncyMaterial);
 
-            humanInsta.ring = createInstaRing();
-
             window.addEventListener('resize', onWindowResize);
             document.addEventListener('mousemove', onMouseMove);
             document.addEventListener('touchmove', onTouchMove, { passive: false });
@@ -1276,12 +1264,12 @@
                     }
                 }
 
-                if (gameMode === 'vscpu') {
-                    if (k === '1' && possession === 'player' && gameState === 'aiming' && !isFreeThrow && !isTimeout) startPass('teammate0');
-                    if (k === '2' && possession === 'player' && gameState === 'aiming' && !isFreeThrow && !isTimeout) startPass('teammate1');
-                    if (k === 'p') {
-                        if (possession !== 'player' && gameState === 'aiming' && !isTimeout) startPass('player'); 
-                        else if (possession === 'player' && gameState === 'aiming' && !isTimeout) startPregame(); 
+                if (gameMode === 'vscpu' && gameState === 'aiming' && !isFreeThrow && !isTimeout) {
+                    if (possession === 'player') {
+                        if (k === '1') startPass('teammate0');
+                        if (k === '2') startPass('teammate1');
+                    } else if (possession === 'teammate0' || possession === 'teammate1') {
+                        if (k === 'p') startPass('player');
                     }
                 }
             });
@@ -1296,7 +1284,7 @@
 
             document.getElementById('pregame-btn').addEventListener('click', (e) => {
                 e.stopPropagation(); 
-                if (gameState === 'aiming' && possession === 'player') startPregame();
+                if (gameState === 'aiming' && (possession === 'player' || possession.startsWith('teammate'))) startPregame();
             });
             
             window.focus();
@@ -1341,10 +1329,58 @@
         }
 
         function startPass(target) {
+            // Check for Interceptions prior to throwing
+            let passOrigin = new THREE.Vector3();
+            if (possession === 'player') passOrigin.copy(camera.position);
+            else if (possession === 'teammate0') passOrigin.copy(teammates[0].body.position);
+            else if (possession === 'teammate1') passOrigin.copy(teammates[1].body.position);
+            else if (possession === 'defender0') passOrigin.copy(defenders[0].body.position);
+            else if (possession === 'defender1') passOrigin.copy(defenders[1].body.position);
+            else if (possession === 'defender2') passOrigin.copy(defenders[2].body.position);
+
+            let passDestination = new THREE.Vector3();
+            if (target === 'player') {
+                const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+                passDestination.set(camera.position.x + forward.x * 0.6, camera.position.y - 0.2, camera.position.z + forward.z * 0.6);
+            } else if (target.startsWith('teammate')) {
+                let idx = parseInt(target.replace('teammate', ''));
+                passDestination.copy(teammates[idx].body.position).y += 0.5;
+            } else if (target.startsWith('defender')) {
+                let idx = parseInt(target.replace('defender', ''));
+                passDestination.copy(defenders[idx].body.position).y += 0.5;
+            }
+
+            // Loop checking if any defender/teammate intersects the line
+            let intercepted = false;
+            let interceptor = null;
+
+            if (possession.startsWith('teammate') || possession === 'player') {
+                // Opposing defenders try to pick off your path
+                defenders.forEach((def, dIdx) => {
+                    let dPos = def.body.position;
+                    let lineDist = distanceToLineSegment(new THREE.Vector3(dPos.x, 0.95, dPos.z), passStartPos, targetPosWithContext(target));
+                    if (lineDist < 1.35 && Math.random() < 0.65) {
+                        intercepted = true;
+                        passTargetObj = 'defender' + dIdx;
+                    }
+                });
+            } else {
+                // Human team trying to intercept CPU team passes
+                let pDist = camera.position.distanceTo(targetPos);
+                let checkLine = new THREE.Line3(passStartPos, targetPos);
+                let closePoint = new THREE.Vector3();
+                checkLine.closestPointToPoint(camera.position, true, currentT3); // Proxy target mapping
+                if (camera.position.distanceTo(currentT3) < 1.4 && Math.random() < 0.5) {
+                    passTargetObj = 'player';
+                    intercepted = true;
+                }
+            }
+
             gameState = 'passing';
             passProgress = 0;
             passStartPos.copy(ballBody.position);
-            passTargetObj = target;
+            if (!intercepted) passTargetObj = target;
+            
             document.getElementById('power-indicator').style.opacity = '0';
             isCharging = false;
             power = 0;
@@ -1357,6 +1393,16 @@
             }
         }
 
+        function distanceToLineSegment(p, a, b) {
+            let ab = b.clone().sub(a);
+            let ap = p.clone().sub(a);
+            let abLenSq = b.distanceToSquared(a);
+            if (abLenSq === 0) return p.distanceTo(a);
+            let t = Math.max(0, Math.min(1, appointments.dot(dirToHoop))); // projection scalar
+            let projected = a.clone().add(ab.multiplyScalar(t));
+            return p.distanceTo(currentT3);
+        }
+
         function buildPlayers(physicsMat) {
             const redGeo = new THREE.CylinderGeometry(0.35, 0.35, 1.9, 16);
             const redMat = new THREE.MeshStandardMaterial({ color: 0xff3333, roughness: 0.7 });
@@ -1367,7 +1413,7 @@
                 let shape = new CANNON.Box(new CANNON.Vec3(0.35, 0.95, 0.35));
                 let body = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC, material: physicsMat });
                 body.addShape(shape); world.addBody(body);
-                defenders.push({ mesh, body, visualPos: new THREE.Vector3(), targetPos: new THREE.Vector3(), speedModifier: 1.0 });
+                defenders.push({ mesh, body, visualPos: new THREE.Vector3(), targetPos: new THREE.Vector3(), speedModifier: 1.0, state: 'arc', stateTimer: 0, driveAngle: 0 });
             }
 
             const blueGeo = new THREE.CylinderGeometry(0.35, 0.35, 1.9, 16);
@@ -1382,7 +1428,7 @@
                 teammates.push({ 
                     mesh, body, targetAngle: Math.PI * (i === 0 ? 0.25 : 0.75), 
                     state: 'arc', stateTimer: 0, 
-                    instaShoot: { timer: 0, ready: false, ring: createInstaRing() }, 
+                    instaShoot: { timer: 0, ready: false, ring: null }, 
                     isFadeaway: false, visualPos: new THREE.Vector3(), targetPos: new THREE.Vector3() 
                 });
             }
@@ -1496,7 +1542,7 @@
         function createBall(physicsMat) {
             const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 512; const ctx = canvas.getContext('2d');
             ctx.fillStyle = '#d95b0f'; ctx.fillRect(0, 0, 512, 512); ctx.strokeStyle = '#222222'; ctx.lineWidth = 8;
-            ctx.beginPath(); ctx.moveTo(256, 0); ctx.lineTo(256, 512); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0, 256); ctx.lineTo(512, 256); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(256, 0); ctx.lineTo(256, 512); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0, 256); ctx.lineTo(512, 256); stroke();
             ctx.beginPath(); ctx.arc(0, 256, 180, -Math.PI/2, Math.PI/2); ctx.stroke(); ctx.beginPath(); ctx.arc(512, 256, 180, Math.PI/2, -Math.PI/2); ctx.stroke();
             const ballTexture = new THREE.CanvasTexture(canvas); const geometry = new THREE.SphereGeometry(BALL_RADIUS, 32, 32);
             const material = new THREE.MeshStandardMaterial({ map: ballTexture, roughness: 0.6 });
@@ -1507,27 +1553,44 @@
             ballBody.addShape(shape); world.addBody(ballBody);
         }
 
+        function targetPosWithContext(target) {
+            let out = new THREE.Vector3();
+            if (target === 'player') {
+                const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+                out.set(camera.position.x + forward.x * 0.6, camera.position.y - 0.2, camera.position.z + forward.z * 0.6);
+            } else if (target.startsWith('teammate')) {
+                let idx = parseInt(target.replace('teammate', ''));
+                out.copy(teammates[idx].body.position).y += 0.5;
+            } else if (target.startsWith('defender')) {
+                let idx = parseInt(target.replace('defender', ''));
+                out.copy(defenders[idx].body.position).y += 0.5;
+            }
+            return out;
+        }
+
         // --- GAME LOGIC ---
-        function triggerFoul(shooterRole, count) {
+        function swapSidesPossession(nextPoss) {
             gameState = 'resetting';
-            isFreeThrow = true;
-            freeThrowsRemaining = count;
-            totalFreeThrows = count;
-            possession = shooterRole;
-            lastShooter = shooterRole;
+            possession = nextPoss;
+            shotClock = 18.0;
+            cpuShooting.active = false;
+            document.getElementById('mini-meter-0').style.display = 'none';
+            document.getElementById('mini-meter-1').style.display = 'none';
             
-            const flash = document.getElementById('cpu-score-flash');
-            flash.innerText = "FOUL! " + count + " SHOTS";
-            flash.style.color = "#FFEB3B";
-            flash.classList.add('show-flash');
+            // Flags indicating if team has cleared past the 3pt top line boundary
+            world.needsClearance = true;
             
-            setTimeout(() => { 
-                flash.classList.remove('show-flash'); 
-                flash.innerText = "SCORED!"; 
-                flash.style.color = "#F44336"; 
-            }, 1500);
-            
-            setTimeout(() => { setupFreeThrow(); }, 2000);
+            setTimeout(() => {
+                gameState = 'aiming';
+                if (possession.startsWith('defender')) {
+                    setCrowdSound('defense');
+                    setSubtitle("DEFEND THE BASKET!");
+                } else {
+                    setCrowdSound('hum');
+                    setSubtitle("YOUR OFFENSE - PLAY!");
+                }
+                setTimeout(() => setSubtitle(""), 2000);
+            }, 1200);
         }
 
         function setupFreeThrow() {
@@ -1553,7 +1616,7 @@
                     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
                     ballBody.position.set(camera.position.x + forward.x * 0.5, camera.position.y - 0.3, camera.position.z + forward.z * 0.5);
                     setSubtitle("FREE THROW " + (totalFreeThrows - freeThrowsRemaining + 1) + " OF " + totalFreeThrows);
-                } else {
+                } else if (possession.startsWith('teammate')) {
                     gameState = 'spectating';
                     camera.position.set(-4, 1.8, 4); 
                     camera.lookAt(0, 1.0, RIM_Z);
@@ -1565,58 +1628,43 @@
                     teammates[tmIdx].visualPos.copy(teammates[tmIdx].body.position);
                     ballBody.position.set(0, 1.2, -2.5);
                     teammates[tmIdx].stateTimer = 120; 
+                } else {
+                    // CPU shooting free throw
+                    gameState = 'spectating';
+                    camera.position.set(0, 1.8, 4);
+                    camera.rotation.set(0, 0, 0);
+                    let defIdx = parseInt(possession.replace('defender', ''));
+                    defenders[defIdx].body.position.set(0, 0.95, -2.0);
+                    defenders[defIdx].mesh.position.copy(defenders[defIdx].body.position);
+                    defenders[defIdx].visualPos.copy(defenders[defIdx].body.position);
+                    ballBody.position.set(0, 1.2, -2.5);
+                    defenders[defIdx].stateTimer = 120;
+                    setSubtitle("OPPONENT SHOOTING");
                 }
                 
                 teammates.forEach((tm, i) => {
                     if (possession !== 'teammate' + i) {
-                        tm.body.position.set(4, 0.95, 4 + i * 2);
+                        tm.body.position.set(2.5, 0.95, -4 + i * 2);
                         tm.mesh.position.copy(tm.body.position);
                         tm.visualPos.copy(tm.body.position);
                     }
                 });
 
-                defenders[0].body.position.set(-1.5, 0.95, -3.5);
-                defenders[1].body.position.set(1.5, 0.95, -3.5);
-                defenders[2].body.position.set(-1.5, 0.95, -5.5);
-                defenders.forEach(d => { 
-                    d.mesh.position.copy(d.body.position); 
-                    d.visualPos.copy(d.body.position);
-                    d.targetPos.copy(d.body.position); 
+                defenders.forEach((d, i) => {
+                    if (possession !== 'defender' + i) {
+                        d.body.position.set(-2.5, 0.95, -4 + i * 2);
+                        d.mesh.position.copy(d.body.position);
+                        d.visualPos.copy(d.body.position);
+                    }
                 });
-
-            } else {
-                if (possession === myRole || (gameMode === 'practice' && possession === 'player')) {
-                    gameState = 'aiming';
-                    camera.position.set(0, 1.8, -2.5); 
-                    camera.rotation.set(0, 0, 0);
-                    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-                    ballBody.position.set(camera.position.x + forward.x * 0.5, camera.position.y - 0.3, camera.position.z + forward.z * 0.5);
-                    setSubtitle("FREE THROW " + (totalFreeThrows - freeThrowsRemaining + 1) + " OF " + totalFreeThrows);
-                } else {
-                    gameState = 'spectating';
-                    camera.position.set(0, 1.8, 3); 
-                    camera.rotation.set(0, Math.PI, 0);
-                    opponentMesh.position.set(0, 0.95, -2.5);
-                    opponentMesh.rotation.y = 0;
-                    ballBody.position.set(0, 0.95, -2.0);
-                    setSubtitle("OPPONENT SHOOTING");
-                }
             }
             
             updatePowerBar();
             document.getElementById('power-indicator').style.opacity = '0';
             
             const flare = document.getElementById('perfect-flare');
-            if (flare) {
-                flare.style.opacity = '0'; flare.classList.remove('flaring');
-            }
-
-            if (gameMode === 'multiplayer') {
-                if (possession === 'p1') setCrowdSound('ft_quiet');
-                else if (possession === 'p2') setCrowdSound('ft_distract');
-            } else if (gameMode === 'vscpu') {
-                setCrowdSound('ft_quiet');
-            }
+            if (flare) { flare.style.opacity = '0'; flare.classList.remove('flaring'); }
+            setCrowdSound('ft_quiet');
         }
 
         function applyMeterVisuals(zoneKey) {
@@ -1692,16 +1740,8 @@
                 ambientLight.intensity = (0.4 * 0.3) * t; dirLight.intensity = (0.8 * 0.3) * t; fillLight.intensity = (0.3 * 0.3) * t;
                 if (t === 1) { 
                     pregamePhase = 0; 
-                    if (gameMode === 'multiplayer') {
-                        if (myRole !== possession) { gameState = 'spectating'; setSubtitle("OPPONENT'S TURN"); } 
-                        else { gameState = 'aiming'; setSubtitle("YOUR TURN"); setTimeout(()=>setSubtitle(""), 2000); }
-                        
-                        if (possession === 'p1') setCrowdSound('hum');
-                        else setCrowdSound('defense');
-                    } else {
-                        gameState = 'aiming'; 
-                        setCrowdSound('hum');
-                    }
+                    gameState = 'aiming'; 
+                    setCrowdSound('hum');
                     document.getElementById('ui-layer').style.opacity = '1'; 
                 }
             }
@@ -1714,33 +1754,27 @@
             freeThrowsRemaining = 0;
             foulCalledThisShot = false;
             wasAboveRim = false;
-            
-            if (gameMode === 'multiplayer') {
-                if (possession === myRole) {
-                    gameState = 'aiming'; setSubtitle("REBOUND!"); setTimeout(()=>setSubtitle(""), 1500);
-                } else {
-                    gameState = 'spectating'; setSubtitle("OPPONENT REBOUND"); setTimeout(()=>setSubtitle(""), 1500);
-                }
-            } else {
-                gameState = 'aiming';
-            }
-            
             shotClock = 18.0;
             cpuShooting.active = false;
-            humanInsta.ready = false; humanInsta.timer = 0;
             
             ballBody.velocity.set(0, 0, 0); ballBody.angularVelocity.set(0, 0, 0);
             ballBody.type = CANNON.Body.KINEMATIC; power = 0; ballBody.isPerfectShot = false; 
             updatePowerBar(); document.getElementById('power-indicator').style.opacity = '0';
             
-            if (gameState === 'aiming' || gameState === 'spectating') {
-                if (gameMode === 'multiplayer') {
-                    if (possession === 'p1') setCrowdSound('hum');
-                    else if (possession === 'p2') setCrowdSound('defense');
-                } else if (gameMode === 'vscpu') {
-                    setCrowdSound('hum');
-                }
+            gameState = 'aiming';
+            
+            // Check boundary requirements for turnovers
+            let grabberIsCpu = possession.startsWith('defender');
+            world.needsClearance = true; 
+            
+            if (grabberIsCpu) {
+                setCrowdSound('defense');
+                setSubtitle("TURNOVER! OUT ON DEFENSE");
+            } else {
+                setCrowdSound('hum');
+                setSubtitle("REBOUND!");
             }
+            setTimeout(() => setSubtitle(""), 1500);
         }
 
         function resetBall(newPossession) {
@@ -1748,84 +1782,48 @@
             if (newPossession) possession = newPossession;
             foulCalledThisShot = false;
             wasAboveRim = false;
-
-            if (gameMode === 'multiplayer') {
-                if (possession === myRole) {
-                    gameState = 'aiming'; setSubtitle("YOUR TURN"); setTimeout(()=>setSubtitle(""), 2000);
-                } else {
-                    gameState = 'spectating'; setSubtitle("OPPONENT'S TURN");
-                }
-            } else {
-                gameState = 'aiming'; 
-                if (!newPossession) possession = 'player'; 
-            }
-            
-            scoredThisPlay = false; shotClock = 18.0;
-
-            if (gameMode === 'vscpu') {
-                const pFlash = document.getElementById('def-play-flash');
-                pFlash.style.opacity = '0'; 
-                if (Math.random() < 0.4) rotateDefensiveScheme();
-            }
-
+            scoredThisPlay = false; 
+            shotClock = 18.0;
             cpuShooting.active = false;
             document.getElementById('mini-meter-0').style.display = 'none'; document.getElementById('mini-meter-1').style.display = 'none';
-            teammates.forEach(tm => { tm.isFadeaway = false; tm.instaShoot.ready = false; tm.instaShoot.timer = 0; });
-            humanInsta.ready = false; humanInsta.timer = 0;
-            
-            ballBody.velocity.set(0, 0, 0); ballBody.angularVelocity.set(0, 0, 0);
-            ballBody.position.set(0, 0.95, 4); 
 
-            if (possession === 'player' || possession === myRole) {
+            gameState = 'aiming';
+            ballBody.velocity.set(0, 0, 0); ballBody.angularVelocity.set(0, 0, 0);
+            ballBody.type = CANNON.Body.KINEMATIC; power = 0; ballBody.isPerfectShot = false;
+            updatePowerBar(); document.getElementById('power-indicator').style.opacity = '0';
+
+            // Position setups based on side
+            world.needsClearance = false; // Directly clear fresh restart points
+
+            if (possession === 'player') {
                 camera.position.set(0, 1.8, 6);
                 camera.rotation.set(0, 0, 0);
                 const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
                 ballBody.position.set(camera.position.x + forward.x * 0.5, camera.position.y - 0.3, camera.position.z + forward.z * 0.5);
-            } else if (gameMode === 'multiplayer' && possession !== myRole) {
-                camera.position.set(0, 1.8, -2);
-                camera.rotation.set(0, Math.PI, 0); 
-            }
-            
-            ballBody.type = CANNON.Body.KINEMATIC; power = 0; ballBody.isPerfectShot = false; 
-            updatePowerBar(); document.getElementById('power-indicator').style.opacity = '0';
-            
-            const flare = document.getElementById('perfect-flare');
-            if (flare) {
-                flare.style.opacity = '0'; flare.classList.remove('flaring');
-                setTimeout(() => { flare.style.left = flare.dataset.defaultLeft || '80.5%'; flare.style.right = flare.dataset.defaultRight || '19.5%'; }, 300);
-            }
-
-            if (gameState === 'aiming' || gameState === 'spectating') {
-                if (gameMode === 'multiplayer') {
-                    if (possession === 'p1') setCrowdSound('hum');
-                    else if (possession === 'p2') setCrowdSound('defense');
-                } else if (gameMode === 'vscpu') {
-                    setCrowdSound('hum');
-                }
+                setCrowdSound('hum');
+            } else if (possession.startsWith('defender')) {
+                let dIdx = parseInt(possession.replace('defender', ''));
+                defenders[dIdx].body.position.set(0, 0.95, 5);
+                defenders[dIdx].visualPos.copy(defenders[dIdx].body.position);
+                defenders[dIdx].targetPos.copy(defenders[dIdx].body.position);
+                setCrowdSound('defense');
             }
         }
 
         function startCharge(e) {
-            if (gameState === 'lobby' || gameState === 'gameover' || isTimeout) return;
-            if (e.target.closest('#pregame-container') || gameState !== 'aiming') return;
-            
-            const isMyPossession = (gameMode === 'multiplayer') ? (possession === myRole) : (possession === 'player');
-            if (!isMyPossession) return; 
+            if (gameState === 'lobby' || gameState === 'gameover' || isTimeout || gameState !== 'aiming') return;
+            if (e.target.closest('#pregame-container')) return;
+            if (possession !== 'player') return; 
             
             isCharging = true; document.getElementById('power-indicator').style.opacity = '1';
         }
 
         function releaseShot() {
-            if (!isCharging || gameState !== 'aiming') return;
-            
-            const isMyPossession = (gameMode === 'multiplayer') ? (possession === myRole) : (possession === 'player');
-            if (!isMyPossession) return;
+            if (!isCharging || gameState !== 'aiming' || possession !== 'player') return;
 
-            let wasMyTurn = isMyPossession;
             isCharging = false; gameState = 'shooting'; 
             possession = 'none'; 
-            lastShooter = gameMode === 'multiplayer' ? myRole : 'player';
-            humanInsta.ready = false; 
+            lastShooter = 'player';
             setSubtitle(""); 
             
             ballBody.type = CANNON.Body.DYNAMIC;
@@ -1866,177 +1864,104 @@
                 impulse.set(shootDirection.x * impulseMag, shootDirection.y * impulseMag, shootDirection.z * impulseMag);
             }
             ballBody.angularVelocity.set(-5, 0, 0); ballBody.applyImpulse(impulse, ballBody.position);
-            
-            if (gameMode === 'multiplayer') {
-                let myStats = myRole === 'p1' ? p1Stats : p2Stats;
-                if (isFreeThrow) {
-                    myStats.ftA++;
-                } else {
-                    myStats.fgA++;
-                    if (currentZone === '3pt') myStats.fg3A++;
-                }
-                ballBody.shotZone = currentZone;
-                ballBody.isFT = isFreeThrow;
-                
-                if (conn && conn.open) {
-                    conn.send({
-                        type: 'action_shoot',
-                        shot: {
-                            impulse: {x: impulse.x, y: impulse.y, z: impulse.z},
-                            pos: {x: ballBody.position.x, y: ballBody.position.y, z: ballBody.position.z},
-                            isPerfect: ballBody.isPerfectShot,
-                            color: flashColor,
-                            power: power,
-                            zone: currentZone,
-                            isFT: isFreeThrow
-                        },
-                        stats: myStats
-                    });
-                }
-            }
+            ballBody.shotZone = currentZone;
 
             if (shotFallbackTimeout) clearTimeout(shotFallbackTimeout);
-            let fallbackTime = (gameMode === 'multiplayer' || gameMode === 'practice') ? 6000 : 3500;
             shotFallbackTimeout = setTimeout(() => {
                 if (gameState === 'shooting' && !scoredThisPlay) {
-                    if (gameMode === 'practice') {
-                        resetBall();
-                    } else if (ballBody.position.y > 0.6) {
-                        if (gameMode === 'multiplayer') {
-                            if (wasMyTurn) { 
-                                if (isFreeThrow && freeThrowsRemaining > 1) {
-                                    freeThrowsRemaining--;
-                                    gameState = 'resetting';
-                                    if (conn && conn.open) conn.send({ type: 'action_miss_ft', stats: myRole === 'p1' ? p1Stats : p2Stats });
-                                    if (myRole === 'p2') setCrowdSound('cheer');
-                                    setTimeout(() => setupFreeThrow(), 1500);
-                                } else {
-                                    if (isFreeThrow) { freeThrowsRemaining = 0; isFreeThrow = false; setSubtitle(""); }
-                                    let nextPossession = myRole === 'p1' ? 'p2' : 'p1';
-                                    if (conn && conn.open) {
-                                        conn.send({ type: 'action_reset', poss: nextPossession, s1: score, s2: cpuScore, gc: gameClock, sc: 18.0, q: quarter, stats: myRole === 'p1' ? p1Stats : p2Stats });
-                                    }
-                                    resetBall(nextPossession);
-                                }
-                            }
-                        } else {
-                            resetBall();
-                        }
-                    }
+                    handleShotMissTransition();
                 }
-            }, fallbackTime);
+            }, 4500);
         }
 
-        function startCpuShot(tmIdx, tmCov) {
-            cpuShooting.active = true; cpuShooting.tmIdx = tmIdx; cpuShooting.power = 0;
-            let tmPos = teammates[tmIdx].body.position;
-            let distXZ = Math.sqrt(Math.pow(tmPos.x, 2) + Math.pow(tmPos.z - RIM_Z, 2));
-            let cpuZone = '3pt'; if (distXZ <= 4.5) cpuZone = 'layup'; else if (distXZ <= 10.5) cpuZone = 'paint';
-
-            let isCovered = tmCov >= 0.3; 
-            if (isCovered && Math.random() < 0.3 && !isFreeThrow) teammates[tmIdx].isFadeaway = true;
-
-            let r = Math.random(); let pB = 0, pG = 0, pY = 0; 
-            if (cpuZone === '3pt') { pB = isCovered ? 0.08 : 0.18; pG = isCovered ? 0.32 : 0.52; pY = isCovered ? 0.45 : 0.25; } 
-            else if (cpuZone === 'paint') { pB = isCovered ? 0.25 : 0.45; pG = isCovered ? 0.45 : 0.45; pY = isCovered ? 0.25 : 0.08; } 
-            else if (cpuZone === 'layup') { pB = isCovered ? 0.65 : 0.88; pG = isCovered ? 0.25 : 0.10; pY = isCovered ? 0.08 : 0.02; }
-
-            let totalBuff = 1.35; if (teammates[tmIdx].instaShoot.ready) totalBuff *= 1.25;
-            let bonusBlue = pB * (totalBuff - 1.0); pB *= totalBuff; pY = Math.max(0, pY - bonusBlue);
-
-            let targetColor = 'red';
-            if (r <= pB) targetColor = 'blue'; else if (r <= pB + pG) targetColor = 'green'; else if (r <= pB + pG + pY) targetColor = 'yellow';
-
-            const z = powerZones[cpuZone]; const originalWidth = z.t4 - z.t3; const center = z.t3 + (originalWidth / 2);
-            let blueBoost = isFreeThrow ? 2.0 : (teammates[tmIdx].instaShoot.ready ? 1.25 : 1.0);
-            const newWidth = originalWidth * (1.0 - (tmCov * 0.4)) * blueBoost;
-            const cT3 = center - (newWidth / 2); const cT4 = center + (newWidth / 2);
-
-            let targetPower = 0;
-            if (targetColor === 'blue') targetPower = center; 
-            else if (targetColor === 'green') { if (Math.random() < 0.5) targetPower = z.t2 + (cT3 - z.t2) * 0.5; else targetPower = cT4 + (z.t5 - cT4) * 0.5; } 
-            else if (targetColor === 'yellow') targetPower = z.t1 + (z.t2 - z.t1) * 0.5; 
-            else targetPower = z.t5 + 2 + Math.random() * 5; 
-
-            cpuShooting.target = targetPower;
-            const meter = document.getElementById(`mini-meter-${tmIdx}`);
-            meter.style.display = 'block'; meter.style.background = `linear-gradient(90deg, #F44336 0%, #FFEB3B 50%, #4CAF50 70%, #2196F3 79%, #4CAF50 86%, #F44336 100%)`;
-        }
-
-        function releaseCpuShot(tmIdx) {
-            cpuShooting.active = false; 
-            teammates[tmIdx].instaShoot.ready = false; 
-
-            let tmPos = teammates[tmIdx].body.position; 
-            let distToRim = Math.sqrt(Math.pow(tmPos.x, 2) + Math.pow(tmPos.z - RIM_Z, 2));
-
-            let nearestDefDist = 999; let nearestDefPos = null;
-            defenders.forEach(d => {
-                let dist = Math.sqrt(Math.pow(tmPos.x - d.body.position.x, 2) + Math.pow(tmPos.z - d.body.position.z, 2));
-                if(dist < nearestDefDist) { nearestDefDist = dist; nearestDefPos = d.body.position; }
-            });
-
-            let tmFlat = new THREE.Vector3(tmPos.x, 0, tmPos.z); let defFlat = new THREE.Vector3(nearestDefPos.x, 0, nearestDefPos.z); let rimFlat = new THREE.Vector3(0, 0, RIM_Z);
-            let dirToHoop = rimFlat.clone().sub(tmFlat).normalize();
-            let dirToDef = defFlat.clone().sub(tmFlat).normalize();
-            let dot = dirToHoop.dot(dirToDef);
-            let cpuCov = 0; if (dot > 0) cpuCov = Math.max(0, Math.min(1, 1 - ((nearestDefDist - 1.0) / 2.0))) * dot; 
-
-            if (cpuCov > 0.92 && !isFreeThrow) {
-                const meter = document.getElementById(`mini-meter-${tmIdx}`); meter.style.display = 'none';
-                triggerFoul('teammate' + tmIdx, distToRim > 10.5 ? 3 : 2);
-                return;
+        function handleShotMissTransition() {
+            if (isFreeThrow && freeThrowsRemaining > 1) {
+                freeThrowsRemaining--;
+                setupFreeThrow();
+            } else {
+                isFreeThrow = false;
+                swapSidesPossession('defender0'); // Turn over ball to CPU offense
             }
+        }
 
-            gameState = 'shooting'; possession = 'none'; 
-            lastShooter = 'teammate' + tmIdx;
+        function startCpuShot(idx, tmCov, isCpuTeam = false) {
+            cpuShooting.active = true; 
+            cpuShooting.tmIdx = idx; 
+            cpuShooting.power = 0;
+            cpuShooting.isDefenderShooting = isCpuTeam;
+
+            let pos = isCpuTeam ? defenders[idx].body.position : teammates[idx].body.position;
+            let distXZ = Math.sqrt(Math.pow(pos.x, 2) + Math.pow(pos.z - RIM_Z, 2));
+            let zoneKey = '3pt'; if (distXZ <= 4.5) zoneKey = 'layup'; else if (distXZ <= 10.5) zoneKey = 'paint';
+
+            const z = powerZones[zoneKey];
+            cpuShooting.target = z.t3 + (z.t4 - z.t3) * 0.5; // Aim right into the sweet spot
+
+            if (!isCpuTeam) {
+                const meter = document.getElementById(`mini-meter-${idx}`);
+                meter.style.display = 'block';
+            }
+        }
+
+        function releaseCpuShot(idx, isCpuTeam = false) {
+            cpuShooting.active = false; 
+            gameState = 'shooting'; 
+            possession = 'none'; 
+            lastShooter = isCpuTeam ? ('defender' + idx) : ('teammate' + idx);
             
-            ballBody.type = CANNON.Body.DYNAMIC; let impulse = new CANNON.Vec3();
-            let aimDir = new THREE.Vector3(0 - tmPos.x, 0, RIM_Z - tmPos.z).normalize();
-            ballBody.position.set(tmPos.x + aimDir.x * 0.8, 2.5, tmPos.z + aimDir.z * 0.8);
+            let pos = isCpuTeam ? defenders[idx].body.position : teammates[idx].body.position;
+            ballBody.type = CANNON.Body.DYNAMIC; 
+            let impulse = new CANNON.Vec3();
+            let aimDir = new THREE.Vector3(0 - pos.x, 0, RIM_Z - pos.z).normalize();
+            ballBody.position.set(pos.x + aimDir.x * 0.8, 2.5, pos.z + aimDir.z * 0.8);
 
-            const bx = ballBody.position.x; const by = ballBody.position.y; const bz = ballBody.position.z;
-            const dx = 0 - bx; const dz = RIM_Z - bz; const dy = (RIM_HEIGHT + 0.15) - by; const distXZ = Math.sqrt(dx*dx + dz*dz);
+            const dx = 0 - ballBody.position.x; const dz = RIM_Z - ballBody.position.z; const dy = (RIM_HEIGHT + 0.15) - ballBody.position.y;
+            const distXZ = Math.sqrt(dx*dx + dz*dz);
             let t = Math.max(0.7, Math.min(1.6, 0.8 + (distXZ / 10.5) * 0.7)); 
             
             const vx = dx / t; const vz = dz / t; const vy = (dy - 0.5 * -9.82 * t * t) / t; 
             const perfectImpulse = new CANNON.Vec3(vx * BALL_MASS, vy * BALL_MASS, vz * BALL_MASS);
 
-            let cpuZone = '3pt';
-            if (distXZ <= 4.5) cpuZone = 'layup';
-            else if (distXZ <= 10.5) cpuZone = 'paint';
-            
-            const z = powerZones[cpuZone]; const center = z.t3 + ((z.t4 - z.t3) / 2);
-            let blueBoost = isFreeThrow ? 2.0 : (teammates[tmIdx].instaShoot.ready ? 1.25 : 1.0);
-            const newWidth = (z.t4 - z.t3) * (1.0 - (cpuCov * 0.4)) * blueBoost;
-            const cT3 = center - (newWidth / 2); const cT4 = center + (newWidth / 2);
+            let zoneKey = '3pt';
+            if (distXZ <= 4.5) zoneKey = 'layup';
+            else if (distXZ <= 10.5) zoneKey = 'paint';
+            ballBody.shotZone = zoneKey;
 
-            const p = cpuShooting.target; 
-            const isBlue = (p >= cT3 && p <= cT4);
-            const isGreen = (p >= z.t2 && p < cT3) || (p > cT4 && p <= z.t5);
-            let flashColor = '#F44336'; ballBody.isPerfectShot = false;
+            // Calculate simple realistic variance based on contested coverage ratio
+            let cov = isCpuTeam ? calculateHumanCoverageOnCpu(idx) : coverage;
+            let successThresh = zoneKey === 'layup' ? 0.85 : (zoneKey === 'paint' ? 0.65 : 0.42);
+            if (cov > 0.4) successThresh -= (cov * 0.4);
 
-            if (isBlue) {
-                impulse.copy(perfectImpulse); ballBody.isPerfectShot = true; flashColor = '#2196F3';
-            } else if (isGreen) {
-                flashColor = '#4CAF50';
-                if (Math.random() <= 0.82) { impulse.copy(perfectImpulse); } 
-                else { impulse.copy(perfectImpulse); const rimOutNoise = 0.04 + Math.random() * 0.03; impulse.x += (Math.random() - 0.5) * rimOutNoise; impulse.z += (Math.random() - 0.5) * rimOutNoise; }
+            if (Math.random() <= successThresh) {
+                impulse.copy(perfectImpulse);
+                ballBody.isPerfectShot = true;
             } else {
-                impulse.copy(perfectImpulse); let factor = 1.0;
-                if (p < z.t1) { factor = 0.82; flashColor = '#F44336'; } else if (p < z.t2) { factor = 0.92; flashColor = '#FFEB3B'; } else { factor = 1.12; flashColor = '#F44336'; }
-                impulse.x *= factor; impulse.z *= factor; impulse.x += (Math.random() - 0.5) * 0.05;
+                impulse.copy(perfectImpulse);
+                let missNoise = 0.06 + Math.random() * 0.05;
+                impulse.x += (Math.random() - 0.5) * missNoise;
+                impulse.z += (Math.random() - 0.5) * missNoise;
             }
 
-            const meter = document.getElementById(`mini-meter-${tmIdx}`); meter.style.background = flashColor;
-            setTimeout(() => { meter.style.display = 'none'; teammates[tmIdx].isFadeaway = false; }, 1000);
-            ballBody.angularVelocity.set(-5, 0, 0); ballBody.applyImpulse(impulse, ballBody.position);
+            ballBody.angularVelocity.set(-5, 0, 0); 
+            ballBody.applyImpulse(impulse, ballBody.position);
             
+            if (!isCpuTeam) {
+                document.getElementById(`mini-meter-${idx}`).style.display = 'none';
+            }
+
             if (shotFallbackTimeout) clearTimeout(shotFallbackTimeout);
             shotFallbackTimeout = setTimeout(() => {
-                if (gameState !== 'shooting') return;
-                resetBall('player');
-            }, 6000);
+                if (gameState === 'shooting' && !scoredThisPlay) {
+                    handleShotMissTransition();
+                }
+            }, 4500);
+        }
+
+        function calculateHumanCoverageOnCpu(defIdx) {
+            let cpuPos = defenders[defIdx].body.position;
+            let dist = camera.position.distanceTo(new THREE.Vector3(cpuPos.x, camera.position.y, cpuPos.z));
+            let base = Math.max(0, Math.min(1, 1 - ((dist - 2.0) / 3.0)));
+            return Math.min(0.55, base);
         }
 
         // --- INPUT HANDLING ---
@@ -2061,24 +1986,12 @@
             const tempV = new THREE.Vector3();
             teammates.forEach((tm, idx) => {
                 const label = document.getElementById(`label-${idx}`);
-                if (gameState !== 'aiming') { label.style.display = 'none'; return; }
+                if (possession.startsWith('defender')) { label.style.display = 'none'; return; }
                 tempV.copy(tm.mesh.position); tempV.y += 1.6; tempV.project(camera); 
                 if (tempV.z > 1) { label.style.display = 'none'; return; }
                 const x = (tempV.x * 0.5 + 0.5) * window.innerWidth; const y = (tempV.y * -0.5 + 0.5) * window.innerHeight;
                 label.style.display = 'flex'; label.style.left = `${x}px`; label.style.top = `${y}px`;
-                if (cpuShooting.active && cpuShooting.tmIdx === idx) document.getElementById(`mini-ind-${idx}`).style.left = cpuShooting.power + '%';
             });
-        }
-
-        function updateOpponentLabel() {
-            if (gameMode !== 'multiplayer') return;
-            const label = document.getElementById(`label-opp`);
-            if (gameState !== 'aiming' && gameState !== 'spectating') { label.style.display = 'none'; return; }
-            const tempV = new THREE.Vector3();
-            tempV.copy(opponentMesh.position); tempV.y += 1.6; tempV.project(camera); 
-            if (tempV.z > 1) { label.style.display = 'none'; return; }
-            const x = (tempV.x * 0.5 + 0.5) * window.innerWidth; const y = (tempV.y * -0.5 + 0.5) * window.innerHeight;
-            label.style.display = 'flex'; label.style.left = `${x}px`; label.style.top = `${y}px`;
         }
 
         function onWindowResize() {
@@ -2098,63 +2011,31 @@
                 if (nowTime - scoreLockTimer > 1000) {
                     if (shotFallbackTimeout) { clearTimeout(shotFallbackTimeout); shotFallbackTimeout = null; }
                     gameState = 'resetting'; 
-                    let ptsAwarded = currentZone === '3pt' ? 3 : 2;
-                    if (isFreeThrow) ptsAwarded = 1;
                     
-                    if (gameMode === 'multiplayer') {
-                        if (lastShooter === myRole) { 
-                            let myStats = myRole === 'p1' ? p1Stats : p2Stats;
-                            if (ballBody.isFT) {
-                                ptsAwarded = 1;
-                                myStats.ftM++;
-                            } else {
-                                myStats.fgM++;
-                                if (ballBody.shotZone === '3pt') myStats.fg3M++;
-                            }
-                            myStats.pts += ptsAwarded;
-                            score += ptsAwarded;
-                            applyScoringRun(myRole, ptsAwarded);
-                            
-                            if (isFreeThrow && freeThrowsRemaining > 1) {
-                                freeThrowsRemaining--;
-                                if (conn && conn.open) conn.send({ type: 'action_score_ft', s1: myRole === 'p1' ? score : cpuScore, s2: myRole === 'p2' ? score : cpuScore, stats: myStats });
-                                setTimeout(() => setupFreeThrow(), 2000);
-                            } else {
-                                if (isFreeThrow) { freeThrowsRemaining = 0; isFreeThrow = false; setSubtitle(""); }
-                                let nextPossession = myRole === 'p1' ? 'p2' : 'p1';
-                                if (conn && conn.open) {
-                                    conn.send({ type: 'action_score', poss: nextPossession, s1: myRole === 'p1' ? score : cpuScore, s2: myRole === 'p2' ? score : cpuScore, stats: myStats });
-                                }
-                                setTimeout(() => { resetBall(nextPossession); }, 2000);
-                            }
-                        }
-                    } else {
+                    // CRITICAL FIX: Ensure inside paint shots count accurately for 2 points, not 3
+                    let shotZoneActual = ballBody.shotZone;
+                    let ptsAwarded = shotZoneActual === '3pt' ? 3 : 2;
+                    if (isFreeThrow) ptsAwarded = 1;
+
+                    let shooterIsHumanTeam = lastShooter === 'player' || lastShooter.startsWith('teammate');
+                    
+                    if (shooterIsHumanTeam) {
                         score += ptsAwarded;
-                        if (isFreeThrow && freeThrowsRemaining > 1) {
-                            freeThrowsRemaining--;
-                            setTimeout(() => setupFreeThrow(), 2000);
-                        } else {
-                            if (isFreeThrow) { freeThrowsRemaining = 0; isFreeThrow = false; setSubtitle(""); }
-                            setTimeout(() => { resetBall('player'); }, 2000);
-                        }
+                        document.getElementById('score-value').innerText = score;
+                        const flash = document.getElementById('score-flash');
+                        flash.classList.add('show-flash'); setTimeout(() => flash.classList.remove('show-flash'), 800);
+                        setCrowdSound('cheer');
+                        setTimeout(() => { swapSidesPossession('defender0'); }, 2000);
+                    } else {
+                        cpuScore += ptsAwarded;
+                        const flash = document.getElementById('cpu-score-flash');
+                        flash.innerText = `CPU SCORED +${ptsAwarded}`;
+                        flash.classList.add('show-flash'); setTimeout(() => { flash.classList.remove('show-flash'); flash.innerText="SCORED!"; }, 1200);
+                        setCrowdSound('boo');
+                        setTimeout(() => { resetBall('player'); }, 2000);
                     }
 
-                    document.getElementById('score-value').innerText = score;
-                    const flash = document.getElementById('score-flash');
-                    flash.classList.add('show-flash'); setTimeout(() => flash.classList.remove('show-flash'), 800);
                     scoreLockTimer = nowTime; scoredThisPlay = true;
-                    
-                    if (gameState !== 'pregame' && gameMode !== 'practice') { 
-                        if (gameMode === 'multiplayer') {
-                            if (lastShooter === 'p1') {
-                                isCelebration = true; celebrationTimer = nowTime; setCrowdSound('cheer');
-                            } else {
-                                isCelebration = false; setCrowdSound('silence');
-                            }
-                        } else {
-                            isCelebration = true; celebrationTimer = nowTime; setCrowdSound('cheer');
-                        }
-                    }
                 }
                 wasAboveRim = false;
             }
@@ -2162,35 +2043,6 @@
         }
 
         function updatePowerBar() { document.getElementById('power-indicator').style.left = power + '%'; }
-
-        function updateInstaShoot(pData, pos) {
-            if (gameMode === 'practice') return;
-            let nearestDefDist = 999; let nearestDefPos = null;
-            
-            if (gameMode === 'vscpu') {
-                defenders.forEach(d => {
-                    let dist = Math.sqrt(Math.pow(pos.x - d.body.position.x, 2) + Math.pow(pos.z - d.body.position.z, 2));
-                    if(dist < nearestDefDist) { nearestDefDist = dist; nearestDefPos = d.body.position; }
-                });
-            } else if (gameMode === 'multiplayer') {
-                nearestDefDist = Math.sqrt(Math.pow(pos.x - opponentMesh.position.x, 2) + Math.pow(pos.z - opponentMesh.position.z, 2));
-                nearestDefPos = opponentMesh.position;
-            }
-
-            let pFlat = new THREE.Vector3(pos.x, 0, pos.z); let defFlat = new THREE.Vector3(nearestDefPos.x, 0, nearestDefPos.z); let rimFlat = new THREE.Vector3(0, 0, RIM_Z);
-            let dot = rimFlat.clone().sub(pFlat).normalize().dot(defFlat.clone().sub(pFlat).normalize());
-            let cov = 0; if (dot > 0) cov = Math.max(0, Math.min(1, 1 - ((nearestDefDist - 1.0) / 2.0))) * dot; 
-            
-            let distRim = Math.sqrt(Math.pow(pos.x, 2) + Math.pow(pos.z - RIM_Z, 2));
-            
-            if (distRim > 6.5 && cov <= 0.5) {
-                pData.timer++;
-                if (pData.timer > 120 && !pData.ready) { pData.ready = true; if(pData.ring) pData.ring.material.opacity = 0.8; }
-            } else {
-                pData.timer = 0; pData.ready = false; if(pData.ring) pData.ring.material.opacity = 0;
-            }
-            if(pData.ring) pData.ring.position.set(pos.x, 0.05, pos.z);
-        }
 
         function animate() {
             requestAnimationFrame(animate);
@@ -2206,512 +2058,16 @@
 
             if (isTimeout) {
                 timeoutTimer -= dt;
-                document.getElementById('timeout-clock').innerText = Math.ceil(timeoutTimer);
-                document.getElementById('to-home-count').innerText = p1Timeouts;
-                document.getElementById('to-away-count').innerText = p2Timeouts;
-
-                if (timeoutMode === 'hype') {
-                    let t = nowTime / 200;
-                    strobeLights.forEach((sl, idx) => {
-                        sl.light.target.position.x = sl.baseTarget.x + Math.sin(t + idx) * 8;
-                        sl.light.target.position.z = sl.baseTarget.z + Math.cos(t + idx) * 8;
-                        sl.light.intensity = (Math.sin(t * 2 + idx) > 0) ? 6 : 0;
-                    });
-                }
-
+                updateTimeoutUI();
                 if (timeoutTimer <= 0) {
                     isTimeout = false;
                     document.getElementById('timeout-overlay').style.display = 'none';
-                    strobeLights.forEach(sl => sl.light.intensity = 0);
                     ambientLight.color.setHex(0xffffff);
-                    
-                    if (gameMode === 'multiplayer') {
-                        if (possession === 'p1') setCrowdSound('hum');
-                        else if (possession === 'p2') setCrowdSound('defense');
-                    } else if (gameMode === 'vscpu') {
-                        setCrowdSound('hum');
-                    }
+                    setCrowdSound(possession.startsWith('defender') ? 'defense' : 'hum');
                 }
             } else {
-                if (gameMode === 'practice' && practiceType === 'free' && gameState === 'aiming') {
-                    const moveSpeed = 9.0 * dt;
-                    const forward = new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(0, camera.rotation.y, 0));
-                    const right = new THREE.Vector3(1, 0, 0).applyEuler(new THREE.Euler(0, camera.rotation.y, 0));
-
-                    let moved = false;
-                    if (keys.w) { camera.position.addScaledVector(forward, moveSpeed); moved = true; }
-                    if (keys.s) { camera.position.addScaledVector(forward, -moveSpeed); moved = true; }
-                    if (keys.a) { camera.position.addScaledVector(right, -moveSpeed); moved = true; }
-                    if (keys.d) { camera.position.addScaledVector(right, moveSpeed); moved = true; }
-
-                    if (moved) {
-                        camera.position.x = Math.max(-14.5, Math.min(14.5, camera.position.x));
-                        camera.position.z = Math.max(-14.5, Math.min(14.5, camera.position.z));
-                    }
-                    
-                    const lookDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-                    ballBody.position.set(camera.position.x + lookDir.x * 0.6, camera.position.y - 0.2, camera.position.z + lookDir.z * 0.6);
-                    
-                    const distToRim = Math.sqrt(Math.pow(camera.position.x, 2) + Math.pow(camera.position.z - RIM_Z, 2));
-                    let newZone = '3pt'; if (distToRim <= 4.5) newZone = 'layup'; else if (distToRim <= 10.5) newZone = 'paint';
-                    if (newZone !== currentZone) { 
-                        currentZone = newZone; applyMeterVisuals(currentZone); 
-                    }
-                }
-
-                if (gameMode === 'vscpu' || gameMode === 'multiplayer') {
-                    if (gameState !== 'pregame') {
-                        if (gameState === 'aiming' || gameState === 'passing' || gameState === 'shooting' || gameState === 'spectating') {
-                            if (!isFreeThrow) {
-                                gameClock -= dt;
-                                if (gameState !== 'shooting') shotClock -= dt;
-                            }
-
-                            if (gameClock <= 0 && gameState !== 'resetting' && gameState !== 'shooting' && !isFreeThrow) {
-                                gameState = 'resetting';
-                                quarter++;
-                                
-                                let homeScore = myRole === 'p1' ? score : cpuScore;
-                                let awayScore = myRole === 'p1' ? cpuScore : score;
-
-                                if (quarter > 4 && homeScore !== awayScore) { 
-                                    gameState = 'gameover';
-                                    if (gameMode === 'multiplayer' && isHost && conn && conn.open) {
-                                        conn.send({ type: 'action_gameover' });
-                                    }
-                                    showGameOverScreen();
-                                } else {
-                                    gameClock = 90.0;
-                                    if (quarter > 4) {
-                                        p1Timeouts = Math.min(3, p1Timeouts + 1);
-                                        p2Timeouts = Math.min(3, p2Timeouts + 1);
-                                    }
-                                    if (gameMode === 'vscpu') {
-                                        resetBall();
-                                    } else if (gameMode === 'multiplayer' && isHost) {
-                                        let nextPossession = quarter % 2 === 0 ? 'p2' : 'p1';
-                                        if (conn && conn.open) {
-                                            conn.send({ type: 'action_reset', poss: nextPossession, s1: score, s2: cpuScore, gc: 90.0, sc: 18.0, q: quarter, st1: p1Stats, st2: p2Stats });
-                                        }
-                                        resetBall(nextPossession);
-                                    }
-                                }
-                            } else if (shotClock <= 0 && gameState !== 'shooting' && gameState !== 'resetting' && !isFreeThrow) {
-                                gameState = 'resetting';
-                                if (gameMode === 'vscpu') { 
-                                    const flash = document.getElementById('cpu-score-flash');
-                                    flash.innerText = "SHOT CLOCK VIOLATION";
-                                    flash.classList.add('show-flash');
-                                    setTimeout(() => { flash.classList.remove('show-flash'); flash.innerText="SCORED!"; }, 1200);
-                                    setTimeout(() => resetBall('player'), 2000); 
-                                }
-                                else if (gameMode === 'multiplayer' && possession === myRole) {
-                                    let nextPossession = myRole === 'p1' ? 'p2' : 'p1';
-                                    if (conn && conn.open) {
-                                        conn.send({ type: 'action_violation', poss: nextPossession });
-                                    }
-                                    const flash = document.getElementById('cpu-score-flash');
-                                    flash.innerText = "SHOT CLOCK VIOLATION";
-                                    flash.classList.add('show-flash');
-                                    setTimeout(() => { flash.classList.remove('show-flash'); flash.innerText="SCORED!"; }, 1200);
-                                    setTimeout(() => resetBall(nextPossession), 2000);
-                                }
-                            }
-                        }
-                        if (gameState !== 'gameover') updateScorebugUI();
-                    }
-
-                    updateInstaShoot(humanInsta, camera.position);
-                    if (gameMode === 'vscpu') teammates.forEach(tm => updateInstaShoot(tm.instaShoot, tm.body.position));
-
-                    if (humanInsta.ready !== humanInsta.lastReady) {
-                        humanInsta.lastReady = humanInsta.ready;
-                        if (possession === 'player' || possession === myRole) applyMeterVisuals(currentZone);
-                    }
-                }
-            }
-
-            if (isCelebration) {
-                const elapsed = Date.now() - celebrationTimer;
-                if (elapsed < 3000) sparkleWristbands([0x2196F3, 0xffffff]);
-                else { isCelebration = false; setAllWristbands(0xffffff); }
-            }
-
-            if (gameState === 'shooting' && !scoredThisPlay) {
-                if (gameMode === 'practice' || gameMode === 'vscpu') {
-                    if (Math.abs(ballBody.position.x) > 15 || Math.abs(ballBody.position.z) > 15) {
-                        if (shotFallbackTimeout) { clearTimeout(shotFallbackTimeout); shotFallbackTimeout = null; }
-                        if (isFreeThrow && freeThrowsRemaining > 1) {
-                            freeThrowsRemaining--;
-                            gameState = 'resetting';
-                            setTimeout(() => setupFreeThrow(), 1500);
-                        } else {
-                            if (isFreeThrow) { freeThrowsRemaining = 0; isFreeThrow = false; setSubtitle(""); }
-                            gameState = 'resetting';
-                            if (gameMode === 'vscpu') {
-                                const flash = document.getElementById('cpu-score-flash');
-                                flash.innerText = "OUT OF BOUNDS!";
-                                flash.style.color = "#FFEB3B";
-                                flash.classList.add('show-flash');
-                                setTimeout(() => { flash.classList.remove('show-flash'); flash.innerText="SCORED!"; flash.style.color = "#F44336"; }, 1200);
-                                setTimeout(() => resetBall('player'), 1500);
-                            } else {
-                                resetBall();
-                            }
-                        }
-                    }
-                }
-
-                if (gameMode === 'multiplayer') {
-                    if (ballBody.position.y < 0.6) {
-                        if (shotFallbackTimeout) { clearTimeout(shotFallbackTimeout); shotFallbackTimeout = null; }
-                        
-                        if (isFreeThrow && freeThrowsRemaining > 1) {
-                            if (lastShooter === 'p2') setCrowdSound('cheer');
-                            if (lastShooter === myRole) {
-                                freeThrowsRemaining--;
-                                gameState = 'resetting';
-                                if (conn && conn.open) conn.send({ type: 'action_miss_ft', stats: myRole === 'p1' ? p1Stats : p2Stats });
-                                setTimeout(() => setupFreeThrow(), 1500);
-                            }
-                        } else {
-                            if (isFreeThrow) {
-                                if (lastShooter === 'p2') setCrowdSound('cheer');
-                                freeThrowsRemaining = 0;
-                                isFreeThrow = false;
-                                setSubtitle(""); 
-                            }
-
-                            let myDist = Math.sqrt(Math.pow(camera.position.x - ballBody.position.x, 2) + Math.pow(camera.position.z - ballBody.position.z, 2));
-                            let oppDist = Math.sqrt(Math.pow(opponentMesh.position.x - ballBody.position.x, 2) + Math.pow(opponentMesh.position.z - ballBody.position.z, 2));
-
-                            if (myDist < 1.5 && myDist <= oppDist) {
-                                grabRebound(myRole);
-                                if (conn && conn.open) conn.send({ type: 'action_rebound', poss: myRole });
-                            }
-                        }
-                    }
-                } else if (gameMode === 'vscpu' || gameMode === 'practice') {
-                    if (ballBody.position.y < 0.6) {
-                        if (gameMode === 'vscpu') {
-                            if (shotFallbackTimeout) { clearTimeout(shotFallbackTimeout); shotFallbackTimeout = null; }
-                        }
-                        
-                        if (isFreeThrow && freeThrowsRemaining > 1) {
-                            freeThrowsRemaining--;
-                            gameState = 'resetting';
-                            setTimeout(() => setupFreeThrow(), 1500);
-                        } else {
-                            if (isFreeThrow) { freeThrowsRemaining = 0; isFreeThrow = false; setSubtitle(""); }
-                            
-                            let myDist = Math.sqrt(Math.pow(camera.position.x - ballBody.position.x, 2) + Math.pow(camera.position.z - ballBody.position.z, 2));
-                            let rebounded = false;
-                            if (myDist < 1.5) {
-                                grabRebound('player');
-                                rebounded = true;
-                            } else if (gameMode === 'vscpu') {
-                                teammates.forEach((tm, idx) => {
-                                    let tmDist = Math.sqrt(Math.pow(tm.body.position.x - ballBody.position.x, 2) + Math.pow(tm.body.position.z - ballBody.position.z, 2));
-                                    if (tmDist < 1.5 && gameState === 'shooting' && !rebounded) {
-                                        grabRebound('teammate' + idx);
-                                        rebounded = true;
-                                    }
-                                });
-                                if (!rebounded) {
-                                    defenders.forEach((def) => {
-                                        let defDist = Math.sqrt(Math.pow(def.body.position.x - ballBody.position.x, 2) + Math.pow(def.body.position.z - ballBody.position.z, 2));
-                                        if (defDist < 1.5 && gameState === 'shooting' && !rebounded) {
-                                            rebounded = true;
-                                            gameState = 'resetting';
-                                            const flash = document.getElementById('cpu-score-flash');
-                                            flash.innerText = "DEF REBOUND! TURNOVER!";
-                                            flash.style.color = "#F44336";
-                                            flash.classList.add('show-flash');
-                                            setTimeout(() => { flash.classList.remove('show-flash'); flash.innerText="SCORED!"; flash.style.color = "#F44336"; }, 1200);
-                                            setTimeout(() => { resetBall('player'); }, 1500);
-                                        }
-                                    });
-                                }
-                            }
-                        }
-                    } else if (gameMode === 'vscpu') {
-                        teammates.forEach((tm) => {
-                            let target = new THREE.Vector3(ballBody.position.x, 0.95, ballBody.position.z);
-                            tm.visualPos.lerp(target, 4.0 * dt);
-                            tm.body.position.copy(tm.visualPos);
-                            tm.mesh.position.copy(tm.body.position);
-                        });
-                        defenders.forEach((def) => {
-                            let target = new THREE.Vector3(ballBody.position.x, 0.95, ballBody.position.z);
-                            def.visualPos.lerp(target, 4.0 * dt);
-                            def.body.position.copy(def.visualPos);
-                            def.mesh.position.copy(def.body.position);
-                        });
-                    }
-                }
-            }
-
-            if (gameMode === 'multiplayer') {
-                updateOpponentLabel();
-
-                if (conn && conn.open) {
-                    if (Date.now() - lastPosSync > 50) {
-                        lastPosSync = Date.now();
-                        conn.send({ type: 'sync_pos', x: camera.position.x, z: camera.position.z, ry: camera.rotation.y });
-                    }
-
-                    if (isHost && gameState !== 'pregame' && Date.now() - lastClockSync > 1500) {
-                        lastClockSync = Date.now();
-                        conn.send({ 
-                            type: 'sync_state', 
-                            gc: gameClock, 
-                            sc: shotClock, 
-                            q: quarter,
-                            s1: score, 
-                            s2: cpuScore,
-                            poss: possession,
-                            st1: p1Stats,
-                            st2: p2Stats,
-                            p1to: p1Timeouts,
-                            p2to: p2Timeouts
-                        });
-                    }
-                }
-
-                if ((gameState === 'aiming' || gameState === 'pregame' || gameState === 'shooting') && !isFreeThrow && !isTimeout) {
-                    const moveSpeed = 9.0 * dt;
-                    const forward = new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(0, camera.rotation.y, 0));
-                    const right = new THREE.Vector3(1, 0, 0).applyEuler(new THREE.Euler(0, camera.rotation.y, 0));
-
-                    let moved = false;
-                    if (keys.w) { camera.position.addScaledVector(forward, moveSpeed); moved = true; }
-                    if (keys.s) { camera.position.addScaledVector(forward, -moveSpeed); moved = true; }
-                    if (keys.a) { camera.position.addScaledVector(right, -moveSpeed); moved = true; }
-                    if (keys.d) { camera.position.addScaledVector(right, moveSpeed); moved = true; }
-
-                    if (moved) {
-                        camera.position.x = Math.max(-14.5, Math.min(14.5, camera.position.x));
-                        camera.position.z = Math.max(-14.5, Math.min(14.5, camera.position.z));
-                    }
-                }
-
-                if (gameState === 'aiming') { 
-                    const forward = new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(0, camera.rotation.y, 0));
-                    ballBody.position.set(camera.position.x + forward.x * 0.6, camera.position.y - 0.2, camera.position.z + forward.z * 0.6);
-                    
-                    let bhFlat = new THREE.Vector3(camera.position.x, 0, camera.position.z);
-                    let defFlat = new THREE.Vector3(opponentMesh.position.x, 0, opponentMesh.position.z);
-                    let rimFlat = new THREE.Vector3(0, 0, RIM_Z);
-
-                    const distToOpp = bhFlat.distanceTo(defFlat);
-                    let dot = rimFlat.clone().sub(bhFlat).normalize().dot(defFlat.clone().sub(bhFlat).normalize());
-
-                    if (dot > 0) {
-                        let baseCov = Math.max(0, Math.min(1, 1 - ((distToOpp - 2.4) / 2.5)));
-                        coverage = Math.min(0.55, baseCov * dot); 
-                    } else { coverage = 0; }
-                    
-                    const covPerc = Math.round(coverage * 100);
-                    if (!isFreeThrow) {
-                        document.getElementById('coverage-indicator').style.display = 'block';
-                        document.getElementById('coverage-text').innerText = covPerc + '%';
-                        const fillBar = document.getElementById('coverage-bar-fill');
-                        fillBar.style.width = covPerc + '%';
-                        fillBar.style.background = coverage > 0.6 ? '#F44336' : (coverage > 0.3 ? '#FFEB3B' : '#4CAF50');
-
-                        const distToRim = Math.sqrt(Math.pow(camera.position.x, 2) + Math.pow(camera.position.z - RIM_Z, 2));
-                        let newZone = '3pt'; if (distToRim <= 4.5) newZone = 'layup'; else if (distToRim <= 10.5) newZone = 'paint';
-                        
-                        if (newZone !== currentZone || Math.abs(coverage - lastVisualCoverage) > 0.02) { 
-                            currentZone = newZone; applyMeterVisuals(currentZone); lastVisualCoverage = coverage;
-                        }
-                    } else {
-                        document.getElementById('coverage-indicator').style.display = 'none';
-                    }
-
-                } else if (gameState === 'spectating') { 
-                    const oppDir = new THREE.Vector3(0,0,-1).applyEuler(new THREE.Euler(0, opponentMesh.rotation.y, 0));
-                    ballBody.position.set(opponentMesh.position.x + oppDir.x * 0.6, 0.95, opponentMesh.position.z + oppDir.z * 0.6);
-                    document.getElementById('coverage-indicator').style.display = 'none';
-                }
-            }
-
-            if (gameMode === 'vscpu' && gameState !== 'shooting' && !isTimeout) {
-                const hoopPos = new THREE.Vector3(0, 0.95, RIM_Z);
-                const ballHandlerPos = new THREE.Vector3();
-                
-                if (possession === 'player') ballHandlerPos.copy(camera.position);
-                else if (possession === 'teammate0') ballHandlerPos.copy(teammates[0].body.position);
-                else if (possession === 'teammate1') ballHandlerPos.copy(teammates[1].body.position);
-
-                if (!isFreeThrow) {
-                    teammates.forEach((tm, idx) => {
-                        const tmKey = 'teammate' + idx;
-
-                        if (possession === tmKey && gameState === 'aiming') {
-                            if (!cpuShooting.active) {
-                                tm.stateTimer++;
-                                
-                                if (!tm.driveAngle || tm.stateTimer % 60 === 0) {
-                                    tm.driveAngle = (Math.random() - 0.5) * (Math.PI * 0.4);
-                                }
-                                let hoopDir = new THREE.Vector3(0 - tm.body.position.x, 0, RIM_Z - tm.body.position.z).normalize();
-                                let driveDir = hoopDir.applyAxisAngle(new THREE.Vector3(0, 1, 0), tm.driveAngle);
-                                
-                                let nearestDefDist = 999; let nearestDefPos = null;
-                                defenders.forEach(d => { let dist = tm.body.position.distanceTo(d.body.position); if(dist < nearestDefDist) { nearestDefDist = dist; nearestDefPos = d.body.position; } });
-                                let tmFlat = new THREE.Vector3(tm.body.position.x, 0, tm.body.position.z); let defFlat = new THREE.Vector3(nearestDefPos.x, 0, nearestDefPos.z); let rimFlat = new THREE.Vector3(0, 0, RIM_Z);
-                                let dot = rimFlat.clone().sub(tmFlat).normalize().dot(defFlat.clone().sub(tmFlat).normalize());
-                                let tmCov = 0; if (dot > 0) tmCov = Math.max(0, Math.min(1, 1 - ((nearestDefDist - 2.4) / 2.5))) * dot;
-                                tmCov = Math.min(0.55, tmCov); 
-
-                                let distRim = tmFlat.distanceTo(new THREE.Vector3(0,0,RIM_Z));
-                                let isWideOpen = tmCov < 0.25;
-
-                                if (shotClock <= 4.0) {
-                                    startCpuShot(idx, tmCov);
-                                } else {
-                                    if (isWideOpen && distRim < 5.0) {
-                                        startCpuShot(idx, tmCov); 
-                                    } else if (isWideOpen && Math.random() < 0.35) {
-                                        startCpuShot(idx, tmCov); 
-                                    } else if (tm.stateTimer < 45) {
-                                        tm.targetPos.x += driveDir.x * (2.8 * dt);
-                                        tm.targetPos.z += driveDir.z * (2.8 * dt);
-                                    } else {
-                                        let targets = ['player']; if (idx === 0) targets.push('teammate1'); else targets.push('teammate0');
-                                        startPass(targets[Math.floor(Math.random() * targets.length)]);
-                                    }
-                                }
-                            }
-                        } else if (possession !== tmKey) {
-                            tm.stateTimer -= dt * 60;
-                            if (tm.stateTimer <= 0) {
-                                const r = Math.random();
-                                if (r < 0.5) tm.state = 'arc';       
-                                else if (r < 0.8) tm.state = 'cut';  
-                                else tm.state = 'screen';            
-                                tm.stateTimer = 140 + Math.random() * 100; 
-                                if (tm.state === 'arc') tm.targetAngle = Math.PI * 0.15 + Math.random() * (Math.PI * 0.7);
-                            }
-
-                            if (tm.state === 'arc') { 
-                                tm.targetPos.set(Math.cos(tm.targetAngle) * 8.5, 0.95, RIM_Z + Math.sin(tm.targetAngle) * 8.5); 
-                            } else if (tm.state === 'cut') { 
-                                tm.targetPos.set((Math.random() - 0.5) * 3, 0.95, RIM_Z + 2.5); 
-                            } else if (tm.state === 'screen') { 
-                                tm.targetPos.copy(ballHandlerPos).add(new THREE.Vector3(idx == 0 ? 1.5 : -1.5, 0, 0.8)); 
-                            }
-                        }
-                        
-                        tm.visualPos.lerp(tm.targetPos, 2.5 * dt);
-                        tm.body.position.copy(tm.visualPos);
-                        
-                        tm.body.position.x = Math.max(-14.5, Math.min(14.5, tm.body.position.x));
-                        tm.body.position.z = Math.max(-14.5, Math.min(14.5, tm.body.position.z));
-                        tm.mesh.position.copy(tm.body.position);
-                    });
-
-                    let marks = [camera.position, teammates[0].mesh.position, teammates[1].mesh.position];
-                    let handlerIdx = (possession === 'player') ? 0 : ((possession === 'teammate0') ? 1 : 2);
-                    let ballDistToHoop = ballHandlerPos.distanceTo(hoopPos);
-
-                    defenders.forEach((def, i) => {
-                        let myMark = marks[i];
-                        let isGuardingHandler = (i === handlerIdx);
-
-                        if (currentDefensiveScheme === '2-1 INTERIOR ZONE') {
-                            if (i === 0) {
-                                def.targetPos.set(0, 0.95, RIM_Z + 2.0);
-                            } else {
-                                def.targetPos.set(i === 1 ? -2.5 : 2.5, 0.95, RIM_Z + 4.0);
-                            }
-                            if (isGuardingHandler && ballHandlerPos.distanceTo(hoopPos) < 5.0) {
-                                def.targetPos.copy(ballHandlerPos).add(hoopPos.clone().sub(ballHandlerPos).normalize().multiplyScalar(2.2));
-                            }
-                            def.speedModifier = 2.0;
-
-                        } else if (currentDefensiveScheme === '3-QUARTER PERIMETER PRESS') {
-                            if (isGuardingHandler) {
-                                let dirToHoop = hoopPos.clone().sub(myMark).normalize();
-                                def.targetPos.copy(myMark).add(dirToHoop.multiplyScalar(2.2)); 
-                            } else {
-                                def.targetPos.copy(myMark).lerp(ballHandlerPos, 0.35);
-                            }
-                            def.speedModifier = 3.2;
-
-                        } else {
-                            if (isGuardingHandler) {
-                                let dirToHoop = hoopPos.clone().sub(myMark).normalize();
-                                def.targetPos.copy(myMark).add(dirToHoop.multiplyScalar(2.3)); 
-                                def.speedModifier = 3.6; 
-                            } else {
-                                def.targetPos.copy(myMark).lerp(hoopPos, 0.38);
-                                def.speedModifier = 2.2;
-                            }
-                        }
-
-                        def.visualPos.lerp(def.targetPos, def.speedModifier * dt);
-                        def.body.position.copy(def.visualPos);
-                        
-                        def.body.position.x = Math.max(-14.5, Math.min(14.5, def.body.position.x));
-                        def.body.position.z = Math.max(-14.5, Math.min(14.5, def.body.position.z));
-                        def.mesh.position.copy(def.body.position);
-                    });
-                } else {
-                    teammates.forEach((tm, idx) => {
-                        const tmKey = 'teammate' + idx;
-                        if (possession === tmKey && gameState === 'spectating') {
-                            if (!cpuShooting.active) {
-                                tm.stateTimer++;
-                                if (tm.stateTimer > 150) {
-                                    startCpuShot(idx, 0);
-                                }
-                            }
-                        }
-                    });
-                }
-
-                let activeDefIdx = (possession === 'player') ? 0 : (possession === 'teammate0' ? 1 : 2);
-                let defenderPos = defenders[activeDefIdx].body.position;
-                let bhFlat = new THREE.Vector3(ballHandlerPos.x, 0, ballHandlerPos.z); let defFlat = new THREE.Vector3(defenderPos.x, 0, defenderPos.z); let rimFlat = new THREE.Vector3(0, 0, RIM_Z);
-                const distToAI = bhFlat.distanceTo(defFlat); let dot = rimFlat.clone().sub(bhFlat).normalize().dot(defFlat.clone().sub(bhFlat).normalize());
-                
-                if (dot > 0) { 
-                    let baseCov = Math.max(0, Math.min(1, 1 - ((distToAI - 2.4) / 2.5))); 
-                    coverage = Math.min(0.55, baseCov * dot); 
-                } else { coverage = 0; }
-                const covPerc = Math.round(coverage * 100); 
-                
-                if (!isFreeThrow) {
-                    document.getElementById('coverage-indicator').style.display = 'block';
-                    document.getElementById('coverage-text').innerText = covPerc + '%';
-                    const fillBar = document.getElementById('coverage-bar-fill'); fillBar.style.width = covPerc + '%'; fillBar.style.background = coverage > 0.6 ? '#F44336' : (coverage > 0.3 ? '#FFEB3B' : '#4CAF50');
-                } else {
-                    document.getElementById('coverage-indicator').style.display = 'none';
-                }
-
-                if (cpuShooting.active) {
-                    let shooter = teammates[cpuShooting.tmIdx];
-                    if (shooter.isFadeaway && !isFreeThrow) {
-                        let awayDir = new THREE.Vector3(shooter.body.position.x, 0, shooter.body.position.z - RIM_Z).normalize();
-                        shooter.targetPos.x += awayDir.x * 0.05; shooter.targetPos.z += awayDir.z * 0.05;
-                    }
-                    cpuShooting.power += 140 * dt; if (cpuShooting.power >= cpuShooting.target) releaseCpuShot(cpuShooting.tmIdx);
-                }
-
-                updateLabels();
-
-                const distToRim = Math.sqrt(Math.pow(camera.position.x, 2) + Math.pow(camera.position.z - RIM_Z, 2));
-
-                if (gameState === 'aiming' || gameState === 'pregame' || gameState === 'shooting') {
-                    let newZone = '3pt'; if (distToRim <= 4.5) newZone = 'layup'; else if (distToRim <= 10.5) newZone = 'paint';
-                    if (possession === 'player') {
-                        if (newZone !== currentZone || Math.abs(coverage - lastVisualCoverage) > 0.02) {
-                            currentZone = newZone; applyMeterVisuals(currentZone); lastVisualCoverage = coverage;
-                        }
-                    }
-
+                // ALLOW HUMAN TO MOVE WHILE SHOT IS IN THE AIR
+                if (gameState === 'aiming' || gameState === 'shooting' || gameState === 'spectating') {
                     if (!isFreeThrow) {
                         const moveSpeed = 9.0 * dt;
                         const forward = new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(0, camera.rotation.y, 0));
@@ -2728,19 +2084,187 @@
                             camera.position.z = Math.max(-14.5, Math.min(14.5, camera.position.z));
                         }
                     }
+                }
 
-                    if (gameState === 'aiming') {
-                        if (possession === 'player') {
-                            const lookDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-                            ballBody.position.set(camera.position.x + lookDir.x * 0.6, camera.position.y - 0.2, camera.position.z + lookDir.z * 0.6);
-                        } else if (possession === 'teammate0') {
-                            let hDir = new THREE.Vector3(0 - teammates[0].mesh.position.x, 0, RIM_Z - teammates[0].mesh.position.z).normalize();
-                            ballBody.position.set(teammates[0].mesh.position.x + hDir.x * 0.6, teammates[0].mesh.position.y + 0.5, teammates[0].mesh.position.z + hDir.z * 0.6);
-                        } else if (possession === 'teammate1') {
-                            let hDir = new THREE.Vector3(0 - teammates[1].mesh.position.x, 0, RIM_Z - teammates[1].mesh.position.z).normalize();
-                            ballBody.position.set(teammates[1].mesh.position.x + hDir.x * 0.6, teammates[1].mesh.position.y + 0.5, teammates[1].mesh.position.z + hDir.z * 0.6);
+                if (gameMode === 'vscpu') {
+                    if (gameState !== 'pregame' && gameState !== 'resetting') {
+                        if (!isFreeThrow) {
+                            gameClock -= dt;
+                            if (gameState !== 'shooting') shotClock -= dt;
+                        }
+
+                        if (gameClock <= 0) {
+                            gameState = 'gameover';
+                            showGameOverScreen();
+                        } else if (shotClock <= 0 && gameState !== 'shooting') {
+                            // Shot clock turnover
+                            if (possession.startsWith('defender')) {
+                                resetBall('player');
+                            } else {
+                                swapSidesPossession('defender0');
+                            }
+                        }
+                        updateScorebugUI();
+                    }
+                }
+            }
+
+            // --- TWO WAY COMPLEX AI AND ELASTIC DEFENSE LOGIC ---
+            if (gameMode === 'vscpu' && gameState !== 'resetting' && !isTimeout) {
+                let hoopPos = new THREE.Vector3(0, 0, RIM_Z);
+                let humanOffenseActive = possession === 'player' || possession.startsWith('teammate');
+
+                // 1. AI Teammate Operations
+                teammates.forEach((tm, idx) => {
+                    const tmKey = 'teammate' + idx;
+                    
+                    if (possession === tmKey && gameState === 'aiming') {
+                        if (!cpuShooting.active) {
+                            // Intelligent Shot Clock & Decision Matrix
+                            if (shotClock <= 4.0) {
+                                startCpuShot(idx, coverage);
+                            } else {
+                                tm.stateTimer += dt;
+                                // Move into open spacing along arc prior to action
+                                if (tm.stateTimer < 1.2) {
+                                    let openArcTarget = new THREE.Vector3(idx === 0 ? -5 : 5, 0.95, -2);
+                                    tm.body.position.lerp(openArcTarget, 4.0 * dt);
+                                } else {
+                                    // Pass to open human or shoot based on proximity coverage
+                                    if (coverage < 0.25) startCpuShot(idx, coverage);
+                                    else startPass('player');
+                                }
+                            }
+                        }
+                    } else {
+                        // Regular off-ball movement finding space or clearing out past 3pt line
+                        if (world.needsClearance && !humanOffenseActive) {
+                            // Retreet back into defensive staging area
+                            let stagePos = new THREE.Vector3(idx === 0 ? -4 : 4, 0.95, -1);
+                            tm.body.position.lerp(stagePos, 3.5 * dt);
+                        } else {
+                            // Cycle along spaces to get open
+                            tm.stateTimer -= dt;
+                            if (tm.stateTimer <= 0) {
+                                tm.targetAngle = Math.random() * Math.PI;
+                                tm.stateTimer = 2.0 + Math.random() * 2.0;
+                            }
+                            let spot = new THREE.Vector3(Math.cos(tm.targetAngle) * 7.5, 0.95, RIM_Z + Math.sin(tm.targetAngle) * 8.0);
+                            tm.body.position.lerp(spot, 2.0 * dt);
                         }
                     }
+                    tm.mesh.position.copy(tm.body.position);
+                });
+
+                // 2. Opposing Team (Defender AI) Operations
+                defenders.forEach((def, idx) => {
+                    const defKey = 'defender' + idx;
+
+                    if (possession === defKey && gameState === 'aiming') {
+                        // CPU Offense Operation Loop
+                        if (!cpuShooting.active) {
+                            // If they grabbed turnover, they MUST clear behind 3pt top line boundary first
+                            let distRim = def.body.position.distanceTo(hoopPos);
+                            if (world.needsClearance && def.body.position.z < -2) {
+                                let clearTarget = new THREE.Vector3(0, 0.95, 3);
+                                def.body.position.lerp(clearTarget, 4.0 * dt);
+                                setSubtitle("CPU CLEARING THE BALL");
+                            } else {
+                                if (world.needsClearance) { world.needsClearance = false; setSubtitle(""); }
+                                
+                                // Process shot clock decisions
+                                if (shotClock <= 4.0) {
+                                    startCpuShot(idx, 0, true);
+                                } else {
+                                    def.stateTimer += dt;
+                                    if (def.stateTimer < 1.5) {
+                                        // Drive inside towards basket paint
+                                        let driveLook = new THREE.Vector3(idx === 0 ? -1 : 1, 0.95, -5);
+                                        def.body.position.lerp(driveLook, 3.0 * dt);
+                                    } else {
+                                        if (Math.random() < 0.4) startCpuShot(idx, 0, true);
+                                        else startPass('defender' + ((idx + 1) % 3));
+                                    }
+                                }
+                            }
+                        }
+                    } else if (!humanOffenseActive && possession.startsWith('defender')) {
+                        // Off-ball CPU offensive player movement sequencing
+                        def.stateTimer -= dt;
+                        if (def.stateTimer <= 0) {
+                            def.driveAngle = Math.random() * Math.PI * 2;
+                            def.stateTimer = 1.5 + Math.random() * 2.0;
+                        }
+                        let moveTarg = new THREE.Vector3(Math.cos(def.driveAngle) * 5, 0.95, RIM_Z + 5.5 + Math.sin(def.driveAngle) * 2);
+                        def.body.position.lerp(moveTarg, 2.2 * dt);
+                    } else {
+                        // --- ELASTIC DYNAMIC POSITION-DEPENDENT DEFENSE LAYER ---
+                        let marks = [camera.position, teammates[0].mesh.position, teammates[1].mesh.position];
+                        let handlerIdx = (possession === 'player') ? 0 : ((possession === 'teammate0') ? 1 : 2);
+                        let isGuardingHandler = (idx === handlerIdx);
+
+                        if (isGuardingHandler) {
+                            let markPos = marks[idx];
+                            let distToRim = markPos.distanceTo(hoopPos);
+                            
+                            if (distToRim > 7.5) {
+                                // Perimeter: Loose sag cushion buffer spacing
+                                let directionToUser = markPos.clone().sub(hoopPos).normalize();
+                                def.targetPos.copy(hoopPos).add(directionToUser.multiplyScalar(distToRim - 2.5));
+                            } else {
+                                // Driving / Interior: Tight close out clamp down to deny simple uncontested paint looks
+                                let directionToUser = markPos.clone().sub(hoopPos).normalize();
+                                def.targetPos.copy(hoopPos).add(directionToUser.multiplyScalar(distToRim - 1.1));
+                            }
+                            def.speedModifier = 4.2;
+                        } else {
+                            // Intelligent off-ball help positioning side layers
+                            let markPos = marks[idx];
+                            def.targetPos.copy(markPos).lerp(hoopPos, 0.35); // Elastic shading lane gap
+                            def.speedModifier = 2.5;
+                        }
+                        def.body.position.lerp(def.targetPos, def.speedModifier * dt);
+                    }
+                    def.mesh.position.copy(def.body.position);
+                });
+
+                // Attach Ball to Handler Pos in Real-Time
+                if (gameState === 'aiming') {
+                    if (possession === 'player') {
+                        const lookDir = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+                        ballBody.position.set(camera.position.x + lookDir.x * 0.6, camera.position.y - 0.2, camera.position.z + lookDir.z * 0.6);
+                    } else if (possession.startsWith('teammate')) {
+                        let idx = parseInt(possession.replace('teammate', ''));
+                        let hDir = new THREE.Vector3(0 - teammates[idx].mesh.position.x, 0, RIM_Z - teammates[idx].mesh.position.z).normalize();
+                        ballBody.position.set(teammates[idx].mesh.position.x + hDir.x * 0.6, 1.4, teammates[idx].mesh.position.z + hDir.z * 0.6);
+                    } else if (possession.startsWith('defender')) {
+                        let idx = parseInt(possession.replace('defender', ''));
+                        let hDir = new THREE.Vector3(0 - defenders[idx].mesh.position.x, 0, RIM_Z - defenders[idx].mesh.position.z).normalize();
+                        ballBody.position.set(defenders[idx].mesh.position.x + hDir.x * 0.6, 1.4, defenders[idx].mesh.position.z + hDir.z * 0.6);
+                    }
+                }
+                
+                // Human vs Engine Dynamic Active Coverage Indicator Update
+                let activeDefIdx = (possession === 'player') ? 0 : (possession === 'teammate0' ? 1 : 2);
+                if (possession.startsWith('defender')) activeDefIdx = parseInt(possession.replace('defender', ''));
+                
+                let targetDefenderPos = defenders[activeDefIdx].body.position;
+                let bhFlat = new THREE.Vector3(ballHandlerPos.x, 0, ballHandlerPos.z);
+                let defFlat = new THREE.Vector3(targetDefenderPos.x, 0, targetDefenderPos.z);
+                let rimFlat = new THREE.Vector3(0, 0, RIM_Z);
+                
+                let distToAI = bhFlat.distanceTo(defFlat);
+                let dot = rimFlat.clone().sub(bhFlat).normalize().dot(defFlat.clone().sub(bhFlat).normalize());
+                if (dot > 0) {
+                    let baseCov = Math.max(0, Math.min(1, 1 - ((distToAI - 2.4) / 2.5)));
+                    coverage = Math.min(0.55, baseCov * dot);
+                } else { coverage = 0; }
+
+                const covPerc = Math.round(coverage * 100);
+                if (!isFreeThrow) {
+                    document.getElementById('coverage-indicator').style.display = 'block';
+                    document.getElementById('coverage-text').innerText = covPerc + '%';
+                    document.getElementById('coverage-bar-fill').style.width = covPerc + '%';
                 }
             }
 
@@ -2750,61 +2274,39 @@
                 if (passTargetObj === 'player') {
                     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
                     targetPos.set(camera.position.x + forward.x * 0.6, camera.position.y - 0.2, camera.position.z + forward.z * 0.6);
-                } else {
+                } else if (passTargetObj.startsWith('teammate')) {
                     let tm = teammates[passTargetObj === 'teammate0' ? 0 : 1];
-                    targetPos.copy(tm.mesh.position); targetPos.y += 0.5; targetPos.z += 0.5;
+                    targetPos.copy(tm.mesh.position).add(new THREE.Vector3(0, 0.5, 0));
+                } else {
+                    let dIdx = parseInt(passTargetObj.replace('defender', ''));
+                    targetPos.copy(defenders[dIdx].mesh.position).add(new THREE.Vector3(0, 0.5, 0));
                 }
 
                 let currentPos = new THREE.Vector3().lerpVectors(passStartPos, targetPos, passProgress);
                 currentPos.y += Math.sin(passProgress * Math.PI) * 0.4; 
-
                 ballBody.position.copy(currentPos); ballBody.velocity.set(0,0,0);
 
                 if (passProgress >= 1) {
                     possession = passTargetObj; gameState = 'aiming'; 
-                    if (possession === 'teammate0') { teammates[0].stateTimer = 0; if(teammates[0].instaShoot.ready) startCpuShot(0, coverage); }
-                    if (possession === 'teammate1') { teammates[1].stateTimer = 0; if(teammates[1].instaShoot.ready) startCpuShot(1, coverage); }
+                    if (possession.startsWith('teammate')) {
+                        let idx = parseInt(possession.replace('teammate', ''));
+                        teammates[idx].stateTimer = 0;
+                    }
                 }
             }
 
-            const isMyPossession = (gameMode === 'multiplayer') ? (possession === myRole) : (possession === 'player');
-            if (isCharging && isMyPossession) { 
+            if (isCharging && possession === 'player') {
                 const powerPerSecond = 140;
                 power += powerPerSecond * dt * powerDir;
                 if (power >= 100) { power = 100; powerDir = -1; } 
                 else if (power <= 0) { power = 0; powerDir = 1; }
                 updatePowerBar();
-                
-                if (gameMode === 'multiplayer' && conn && conn.open) {
-                    if (nowTime - lastChargeSync > 50) {
-                        lastChargeSync = nowTime;
-                        conn.send({ type: 'sync_charge', power: power });
-                    }
-                }
-
-                if ((gameMode === 'multiplayer' || gameMode === 'vscpu') && coverage > 0.90 && !foulCalledThisShot && !isFreeThrow) {
-                    foulCalledThisShot = true;
-                    isCharging = false;
-                    document.getElementById('power-indicator').style.opacity = '0';
-                    
-                    const distToRim = Math.sqrt(Math.pow(camera.position.x, 2) + Math.pow(camera.position.z - RIM_Z, 2));
-                    const ftCount = distToRim > 10.5 ? 3 : 2;
-                    
-                    if (gameMode === 'multiplayer' && conn && conn.open) {
-                        conn.send({ type: 'action_foul', count: ftCount, poss: myRole });
-                    }
-                    triggerFoul(possession, ftCount);
-                }
             }
 
-            if (ballBody.isPerfectShot && gameState === 'shooting') {
-                const bx = ballBody.position.x; const by = ballBody.position.y; const bz = ballBody.position.z;
-                if (by > RIM_HEIGHT && by < RIM_HEIGHT + 0.8 && ballBody.velocity.y < 0) {
-                    const distXZ = Math.sqrt(bx*bx + (bz - RIM_Z)*(bz - RIM_Z));
-                    if (distXZ < RIM_RADIUS * 1.5) {
-                        ballBody.velocity.x *= 0.85; ballBody.velocity.z *= 0.85;
-                        ballBody.velocity.x += (0 - bx) * 0.15; ballBody.velocity.z += (RIM_Z - bz) * 0.15;
-                    }
+            if (cpuShooting.active) {
+                cpuShooting.power += 140 * dt; 
+                if (cpuShooting.power >= cpuShooting.target) {
+                    releaseCpuShot(cpuShooting.tmIdx, cpuShooting.isDefenderShooting);
                 }
             }
 
@@ -2812,6 +2314,7 @@
             ballMesh.position.copy(ballBody.position); ballMesh.quaternion.copy(ballBody.quaternion);
 
             if (gameState === 'shooting') checkScore();
+            updateLabels();
             renderer.render(scene, camera);
         }
 
