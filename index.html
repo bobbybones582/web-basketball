@@ -807,7 +807,7 @@
 
             let winnerText = "TIE GAME!";
             if (p1Stats.pts > p2Stats.pts) winnerText = "HOME WINS!";
-            else if (p2Stats.pts > p2Stats.pts) winnerText = "AWAY WINS!";
+            else if (p2Stats.pts > p1Stats.pts) winnerText = "AWAY WINS!";
 
             goScreen.innerHTML = `
                 <div style="background: rgba(17, 17, 24, 0.95); position: absolute; top:0; left:0; width:100%; height:100%; display:flex; flex-direction:column; justify-content:center; align-items:center; z-index:100; color:white; font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
@@ -1092,8 +1092,17 @@
                 document.getElementById('sb-p1-name').innerText = "HUM";
                 document.getElementById('sb-p2-name').innerText = "CPU";
 
-                defenders.forEach(d => { d.mesh.visible = true; d.body.position.set(0, 0.95, -4); });
-                teammates.forEach((tm, i) => { tm.mesh.visible = true; tm.body.position.set(i === 0 ? -6 : 6, 0.95, 0); });
+                defenders.forEach((d, i) => { 
+                    d.mesh.visible = true; 
+                    d.body.position.set(i === 0 ? 0 : (i === 1 ? -4 : 4), 0.95, -4); 
+                    d.visualPos.copy(d.body.position);
+                });
+                teammates.forEach((tm, i) => { 
+                    tm.mesh.visible = true; 
+                    tm.body.position.set(i === 0 ? -6 : 6, 0.95, 0); 
+                    tm.visualPos.copy(tm.body.position);
+                    tm.targetPos.copy(tm.body.position);
+                });
                 resetBall(); 
             } else if (gameMode === 'practice') {
                 gameState = 'aiming';
@@ -1340,7 +1349,7 @@
                 let shape = new CANNON.Box(new CANNON.Vec3(0.35, 0.95, 0.35));
                 let body = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC, material: physicsMat });
                 body.addShape(shape); world.addBody(body);
-                defenders.push({ mesh, body });
+                defenders.push({ mesh, body, visualPos: new THREE.Vector3(), targetPos: new THREE.Vector3(), speedModifier: 1.0 });
             }
 
             const blueGeo = new THREE.CylinderGeometry(0.35, 0.35, 1.9, 16);
@@ -1352,7 +1361,12 @@
                 let shape = new CANNON.Box(new CANNON.Vec3(0.35, 0.95, 0.35));
                 let body = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC, material: physicsMat });
                 body.addShape(shape); world.addBody(body);
-                teammates.push({ mesh, body, targetAngle: Math.PI * (i === 0 ? 0.25 : 0.75), state: 'arc', stateTimer: 0, instaShoot: { timer: 0, ready: false, ring: createInstaRing() }, isFadeaway: false });
+                teammates.push({ 
+                    mesh, body, targetAngle: Math.PI * (i === 0 ? 0.25 : 0.75), 
+                    state: 'arc', stateTimer: 0, 
+                    instaShoot: { timer: 0, ready: false, ring: createInstaRing() }, 
+                    isFadeaway: false, visualPos: new THREE.Vector3(), targetPos: new THREE.Vector3() 
+                });
             }
 
             opponentMesh = new THREE.Mesh(redGeo, redMat); 
@@ -1530,6 +1544,7 @@
                     let tmIdx = possession === 'teammate0' ? 0 : 1;
                     teammates[tmIdx].body.position.set(0, 0.95, -2.0);
                     teammates[tmIdx].mesh.position.copy(teammates[tmIdx].body.position);
+                    teammates[tmIdx].visualPos.copy(teammates[tmIdx].body.position);
                     ballBody.position.set(0, 1.2, -2.5);
                     teammates[tmIdx].stateTimer = 120; 
                 }
@@ -1538,13 +1553,18 @@
                     if (possession !== 'teammate' + i) {
                         tm.body.position.set(4, 0.95, 4 + i * 2);
                         tm.mesh.position.copy(tm.body.position);
+                        tm.visualPos.copy(tm.body.position);
                     }
                 });
 
                 defenders[0].body.position.set(-1.5, 0.95, -3.5);
                 defenders[1].body.position.set(1.5, 0.95, -3.5);
                 defenders[2].body.position.set(-1.5, 0.95, -5.5);
-                defenders.forEach(d => { d.mesh.position.copy(d.body.position); d.lagTarget = new THREE.Vector3().copy(d.body.position); });
+                defenders.forEach(d => { 
+                    d.mesh.position.copy(d.body.position); 
+                    d.visualPos.copy(d.body.position);
+                    d.targetPos.copy(d.body.position); 
+                });
 
             } else {
                 if (possession === myRole || (gameMode === 'practice' && possession === 'player')) {
@@ -1897,10 +1917,11 @@
             let isCovered = tmCov >= 0.3; 
             if (isCovered && Math.random() < 0.3 && !isFreeThrow) teammates[tmIdx].isFadeaway = true;
 
+            // Heavily boosted baseline conversion success parameters for deep paint looks
             let r = Math.random(); let pB = 0, pG = 0, pY = 0; 
-            if (cpuZone === '3pt') { pB = isCovered ? 0.02 : 0.05; pG = isCovered ? 0.23 : 0.45; pY = isCovered ? 0.60 : 0.45; } 
-            else if (cpuZone === 'paint') { pB = isCovered ? 0.075 : 0.125; pG = isCovered ? 0.275 : 0.475; pY = isCovered ? 0.550 : 0.365; } 
-            else if (cpuZone === 'layup') { pB = isCovered ? 0.55 : 0.75; pG = isCovered ? 0.35 : 0.15; pY = isCovered ? 0.06 : 0.09; }
+            if (cpuZone === '3pt') { pB = isCovered ? 0.08 : 0.18; pG = isCovered ? 0.32 : 0.52; pY = isCovered ? 0.45 : 0.25; } 
+            else if (cpuZone === 'paint') { pB = isCovered ? 0.25 : 0.45; pG = isCovered ? 0.45 : 0.45; pY = isCovered ? 0.25 : 0.08; } 
+            else if (cpuZone === 'layup') { pB = isCovered ? 0.65 : 0.88; pG = isCovered ? 0.25 : 0.10; pY = isCovered ? 0.08 : 0.02; }
 
             let totalBuff = 1.35; if (teammates[tmIdx].instaShoot.ready) totalBuff *= 1.25;
             let bonusBlue = pB * (totalBuff - 1.0); pB *= totalBuff; pY = Math.max(0, pY - bonusBlue);
@@ -1910,7 +1931,7 @@
 
             const z = powerZones[cpuZone]; const originalWidth = z.t4 - z.t3; const center = z.t3 + (originalWidth / 2);
             let blueBoost = isFreeThrow ? 2.0 : (teammates[tmIdx].instaShoot.ready ? 1.25 : 1.0);
-            const newWidth = originalWidth * (1.0 - (tmCov * 0.5)) * blueBoost;
+            const newWidth = originalWidth * (1.0 - (tmCov * 0.4)) * blueBoost;
             const cT3 = center - (newWidth / 2); const cT4 = center + (newWidth / 2);
 
             let targetPower = 0;
@@ -1943,7 +1964,7 @@
             let dot = dirToHoop.dot(dirToDef);
             let cpuCov = 0; if (dot > 0) cpuCov = Math.max(0, Math.min(1, 1 - ((nearestDefDist - 1.0) / 2.0))) * dot; 
 
-            if (cpuCov > 0.90 && !isFreeThrow) {
+            if (cpuCov > 0.92 && !isFreeThrow) {
                 const meter = document.getElementById(`mini-meter-${tmIdx}`); meter.style.display = 'none';
                 triggerFoul('teammate' + tmIdx, distToRim > 10.5 ? 3 : 2);
                 return;
@@ -1969,7 +1990,7 @@
             
             const z = powerZones[cpuZone]; const center = z.t3 + ((z.t4 - z.t3) / 2);
             let blueBoost = isFreeThrow ? 2.0 : (teammates[tmIdx].instaShoot.ready ? 1.25 : 1.0);
-            const newWidth = (z.t4 - z.t3) * (1.0 - (cpuCov * 0.5)) * blueBoost;
+            const newWidth = (z.t4 - z.t3) * (1.0 - (cpuCov * 0.4)) * blueBoost;
             const cT3 = center - (newWidth / 2); const cT4 = center + (newWidth / 2);
 
             const p = cpuShooting.target; 
@@ -1981,12 +2002,12 @@
                 impulse.copy(perfectImpulse); ballBody.isPerfectShot = true; flashColor = '#2196F3';
             } else if (isGreen) {
                 flashColor = '#4CAF50';
-                if (Math.random() <= 0.65) { impulse.copy(perfectImpulse); } 
-                else { impulse.copy(perfectImpulse); const rimOutNoise = 0.08 + Math.random() * 0.05; impulse.x += (Math.random() - 0.5) * rimOutNoise; impulse.z += (Math.random() - 0.5) * rimOutNoise; }
+                if (Math.random() <= 0.82) { impulse.copy(perfectImpulse); } 
+                else { impulse.copy(perfectImpulse); const rimOutNoise = 0.04 + Math.random() * 0.03; impulse.x += (Math.random() - 0.5) * rimOutNoise; impulse.z += (Math.random() - 0.5) * rimOutNoise; }
             } else {
                 impulse.copy(perfectImpulse); let factor = 1.0;
-                if (p < z.t1) { factor = 0.75; flashColor = '#F44336'; } else if (p < z.t2) { factor = 0.88; flashColor = '#FFEB3B'; } else { factor = 1.15; flashColor = '#F44336'; }
-                impulse.x *= factor; impulse.z *= factor; impulse.x += (Math.random() - 0.5) * 0.08;
+                if (p < z.t1) { factor = 0.82; flashColor = '#F44336'; } else if (p < z.t2) { factor = 0.92; flashColor = '#FFEB3B'; } else { factor = 1.12; flashColor = '#F44336'; }
+                impulse.x *= factor; impulse.z *= factor; impulse.x += (Math.random() - 0.5) * 0.05;
             }
 
             const meter = document.getElementById(`mini-meter-${tmIdx}`); meter.style.background = flashColor;
@@ -2396,31 +2417,17 @@
                             }
                         }
                     } else if (gameMode === 'vscpu') {
-                        const teamSpeed = 9.0 * dt; const redSpeed = 9.0 * dt; 
+                        // Smoothly guide players to tracking vector points during loose-ball scenario loops[cite: 1]
                         teammates.forEach((tm) => {
-                            let mDir = new THREE.Vector3(ballBody.position.x - tm.body.position.x, 0, ballBody.position.z - tm.body.position.z);
-                            let dist = mDir.length();
-                            if (dist > 0.1) {
-                                mDir.normalize();
-                                let s = Math.min(dist, teamSpeed);
-                                tm.body.position.x += mDir.x * s;
-                                tm.body.position.z += mDir.z * s;
-                            }
-                            tm.body.position.x = Math.max(-14.5, Math.min(14.5, tm.body.position.x));
-                            tm.body.position.z = Math.max(-14.5, Math.min(14.5, tm.body.position.z));
+                            let target = new THREE.Vector3(ballBody.position.x, 0.95, ballBody.position.z);
+                            tm.visualPos.lerp(target, 4.0 * dt);
+                            tm.body.position.copy(tm.visualPos);
                             tm.mesh.position.copy(tm.body.position);
                         });
                         defenders.forEach((def) => {
-                            let mDir = new THREE.Vector3(ballBody.position.x - def.body.position.x, 0, ballBody.position.z - def.body.position.z);
-                            let dist = mDir.length();
-                            if (dist > 0.1) {
-                                mDir.normalize();
-                                let s = Math.min(dist, redSpeed);
-                                def.body.position.x += mDir.x * s;
-                                def.body.position.z += mDir.z * s;
-                            }
-                            def.body.position.x = Math.max(-14.5, Math.min(14.5, def.body.position.x));
-                            def.body.position.z = Math.max(-14.5, Math.min(14.5, def.body.position.z));
+                            let target = new THREE.Vector3(ballBody.position.x, 0.95, ballBody.position.z);
+                            def.visualPos.lerp(target, 4.0 * dt);
+                            def.body.position.copy(def.visualPos);
                             def.mesh.position.copy(def.body.position);
                         });
                     }
@@ -2512,15 +2519,17 @@
                 }
             }
 
+            // --- REFACTORED 3v3 TACTICAL AI SYSTEM ---[cite: 1]
             if (gameMode === 'vscpu' && gameState !== 'shooting' && !isTimeout) {
-                const teamSpeed = 9.0 * dt; const redSpeed = 9.0 * dt; 
-                const hoopPos = new THREE.Vector3(0, 0, RIM_Z);
+                const hoopPos = new THREE.Vector3(0, 0.95, RIM_Z);
                 const ballHandlerPos = new THREE.Vector3();
+                
                 if (possession === 'player') ballHandlerPos.copy(camera.position);
-                else if (possession === 'teammate0') ballHandlerPos.set(teammates[0].body.position.x, teammates[0].body.position.y, teammates[0].body.position.z);
-                else if (possession === 'teammate1') ballHandlerPos.set(teammates[1].body.position.x, teammates[1].body.position.y, teammates[1].body.position.z);
+                else if (possession === 'teammate0') ballHandlerPos.copy(teammates[0].body.position);
+                else if (possession === 'teammate1') ballHandlerPos.copy(teammates[1].body.position);
 
                 if (!isFreeThrow) {
+                    // 1. Off-Ball and On-Ball Offensive AI Flow[cite: 1]
                     teammates.forEach((tm, idx) => {
                         const tmKey = 'teammate' + idx;
 
@@ -2528,123 +2537,118 @@
                             if (!cpuShooting.active) {
                                 tm.stateTimer++;
                                 
-                                if (!tm.driveAngle || tm.stateTimer % 45 === 0) tm.driveAngle = (Math.random() - 0.5) * Math.PI;
+                                // Generate a deliberate drive towards the baseline rather than sporadic snapping loops[cite: 1]
+                                if (!tm.driveAngle || tm.stateTimer % 60 === 0) {
+                                    tm.driveAngle = (Math.random() - 0.5) * (Math.PI * 0.4);
+                                }
                                 let hoopDir = new THREE.Vector3(0 - tm.body.position.x, 0, RIM_Z - tm.body.position.z).normalize();
-                                let driveDir = hoopDir.applyAxisAngle(new THREE.Vector3(0,1,0), tm.driveAngle);
+                                let driveDir = hoopDir.applyAxisAngle(new THREE.Vector3(0, 1, 0), tm.driveAngle);
                                 
-                                let driveSpeed = 3.5 * dt;
-                                tm.body.position.x += driveDir.x * driveSpeed;
-                                tm.body.position.z += driveDir.z * driveSpeed;
+                                // Slowed down handling loops to a human-realistic stride speed[cite: 1]
+                                tm.targetPos.x += driveDir.x * (2.8 * dt);
+                                tm.targetPos.z += driveDir.z * (2.8 * dt);
 
+                                // Find nearest opponent boundary
                                 let nearestDefDist = 999; let nearestDefPos = null;
                                 defenders.forEach(d => { let dist = tm.body.position.distanceTo(d.body.position); if(dist < nearestDefDist) { nearestDefDist = dist; nearestDefPos = d.body.position; } });
                                 let tmFlat = new THREE.Vector3(tm.body.position.x, 0, tm.body.position.z); let defFlat = new THREE.Vector3(nearestDefPos.x, 0, nearestDefPos.z); let rimFlat = new THREE.Vector3(0, 0, RIM_Z);
                                 let dot = rimFlat.clone().sub(tmFlat).normalize().dot(defFlat.clone().sub(tmFlat).normalize());
-                                let tmCov = 0; if (dot > 0) tmCov = Math.max(0, Math.min(1, 1 - ((nearestDefDist - 1.0) / 2.0))) * dot;
+                                let tmCov = 0; if (dot > 0) tmCov = Math.max(0, Math.min(1, 1 - ((nearestDefDist - 1.2) / 2.0))) * dot;
 
-                                let forceShoot = (shotClock <= 3.0);
-                                let isWideOpen = tmCov < 0.15;
-                                let isContested = tmCov > 0.65;
+                                let distRim = tmFlat.distanceTo(new THREE.Vector3(0,0,RIM_Z));
+                                let forceShoot = (shotClock <= 2.5);
+                                let isWideOpen = tmCov < 0.20;
+                                let isContested = tmCov > 0.55;
 
                                 if (forceShoot) {
-                                    if (isContested && Math.random() < 0.6 && shotClock > 1.0) {
+                                    if (isContested && Math.random() < 0.4 && shotClock > 0.8) {
                                         let targets = ['player']; if (idx === 0) targets.push('teammate1'); else targets.push('teammate0');
                                         startPass(targets[Math.floor(Math.random() * targets.length)]);
                                     } else {
                                         startCpuShot(idx, tmCov);
                                     }
+                                } else if (distRim < 4.0 && isWideOpen) {
+                                    startCpuShot(idx, tmCov); // Take high-efficiency wide open point-blank layups
                                 } else if (tm.instaShoot.ready && isWideOpen) {
+                                    startCpuShot(idx, tmCov); // Catch and shoot immediate conversion
+                                } else if (tm.stateTimer > 75 && isWideOpen) {
                                     startCpuShot(idx, tmCov);
-                                } else if (tm.stateTimer > 60 && isWideOpen) {
-                                    startCpuShot(idx, tmCov);
-                                } else if (tm.stateTimer > 100) { 
-                                    if (isContested) {
-                                        let targets = ['player']; if (idx === 0) targets.push('teammate1'); else targets.push('teammate0');
-                                        startPass(targets[Math.floor(Math.random() * targets.length)]);
-                                    } else {
-                                        startCpuShot(idx, tmCov);
-                                    }
+                                } else if (tm.stateTimer > 120 || isContested) { 
+                                    // Structured kick-out passing mechanics to look for space[cite: 1]
+                                    let targets = ['player']; if (idx === 0) targets.push('teammate1'); else targets.push('teammate0');
+                                    startPass(targets[Math.floor(Math.random() * targets.length)]);
                                 }
                             }
                         } else if (possession !== tmKey) {
-                            tm.stateTimer--;
+                            // Off-ball behavior tree tracking space patterns[cite: 1]
+                            tm.stateTimer -= dt * 60;
                             if (tm.stateTimer <= 0) {
                                 const r = Math.random();
-                                if (r < 0.3) tm.state = 'arc'; else if (r < 0.5) tm.state = 'cut'; else if (r < 0.8) tm.state = 'screen'; else tm.state = 'juke';
-                                tm.stateTimer = 120 + Math.random() * 120; 
-                                if (tm.state === 'arc') tm.targetAngle = Math.random() * Math.PI;
+                                if (r < 0.5) tm.state = 'arc';       // Relocate behind the 3PT line[cite: 1]
+                                else if (r < 0.8) tm.state = 'cut';  // Smooth slash down the lane
+                                else tm.state = 'screen';            // Pin down off-ball screen assignment
+                                tm.stateTimer = 140 + Math.random() * 100; 
+                                if (tm.state === 'arc') tm.targetAngle = Math.PI * 0.15 + Math.random() * (Math.PI * 0.7);
                             }
 
-                            let targetPos = new THREE.Vector3();
-                            if (tm.state === 'arc') { targetPos.set(Math.cos(tm.targetAngle) * 8, 0.95, RIM_Z + Math.sin(tm.targetAngle) * 8); } 
-                            else if (tm.state === 'cut') { targetPos.set(0, 0.95, RIM_Z); } 
-                            else if (tm.state === 'screen') { targetPos.copy(ballHandlerPos).add(new THREE.Vector3(1, 0, 1)); } 
-                            else if (tm.state === 'juke') {
-                                if (tm.stateTimer % 30 === 0) tm.targetAngle = Math.random() * Math.PI * 2;
-                                targetPos.set(tm.body.position.x + Math.cos(tm.targetAngle)*3, 0.95, tm.body.position.z + Math.sin(tm.targetAngle)*3); 
-                            }
-                            
-                            let mDir = new THREE.Vector3(targetPos.x - tm.body.position.x, 0, targetPos.z - tm.body.position.z);
-                            let dist = mDir.length();
-                            if (dist > 0.1) {
-                                mDir.normalize();
-                                let s = Math.min(dist, teamSpeed * (tm.state === 'juke' ? 1.2 : 1.0));
-                                tm.body.position.x += mDir.x * s;
-                                tm.body.position.z += mDir.z * s;
+                            if (tm.state === 'arc') { 
+                                tm.targetPos.set(Math.cos(tm.targetAngle) * 8.5, 0.95, RIM_Z + Math.sin(tm.targetAngle) * 8.5); 
+                            } else if (tm.state === 'cut') { 
+                                tm.targetPos.set((Math.random() - 0.5) * 3, 0.95, RIM_Z + 2.5); 
+                            } else if (tm.state === 'screen') { 
+                                targetPos.copy(ballHandlerPos).add(new THREE.Vector3(idx == 0 ? 1.5 : -1.5, 0, 0.8)); 
                             }
                         }
+                        
+                        // Human-realistic bounding speed clamps using smooth interpolation loops[cite: 1]
+                        tm.visualPos.lerp(tm.targetPos, 2.5 * dt);
+                        tm.body.position.copy(tm.visualPos);
+                        
                         tm.body.position.x = Math.max(-14.5, Math.min(14.5, tm.body.position.x));
                         tm.body.position.z = Math.max(-14.5, Math.min(14.5, tm.body.position.z));
                         tm.mesh.position.copy(tm.body.position);
                     });
 
-                    let defTargets = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+                    // 2. Continuous Proximity Recovery Defense Loop[cite: 1]
                     let marks = [camera.position, teammates[0].mesh.position, teammates[1].mesh.position];
+                    let handlerIdx = (possession === 'player') ? 0 : ((possession === 'teammate0') ? 1 : 2);
                     let ballDistToHoop = ballHandlerPos.distanceTo(hoopPos);
 
                     defenders.forEach((def, i) => {
-                        if (!def.lagTarget) def.lagTarget = new THREE.Vector3().copy(def.body.position);
-                        
                         let myMark = marks[i];
-                        let markHasBall = false;
-                        if (i === 0 && possession === 'player') markHasBall = true;
-                        if (i === 1 && possession === 'teammate0') markHasBall = true;
-                        if (i === 2 && possession === 'teammate1') markHasBall = true;
+                        let isGuardingHandler = (i === handlerIdx);
 
-                        if (markHasBall) {
+                        if (isGuardingHandler) {
+                            // On-ball defender squares up along the path line to the hoop[cite: 1]
                             let dirToHoop = hoopPos.clone().sub(myMark).normalize();
-                            defTargets[i].copy(myMark).add(dirToHoop.multiplyScalar(1.2));
+                            def.targetPos.copy(myMark).add(dirToHoop.multiplyScalar(1.1));
+                            def.speedModifier = 3.8; // On-ball closing stride intensity[cite: 1]
                         } else {
-                            if (ballDistToHoop < 5.5 && Math.random() < 0.05) {
-                                def.helpTarget = ballHandlerPos.clone().add(hoopPos.clone().sub(ballHandlerPos).normalize().multiplyScalar(1.0));
-                            }
-                            if (def.helpTarget && ballDistToHoop < 6.5) {
-                                defTargets[i].copy(def.helpTarget);
+                            // Off-ball team defense: implementation of dynamic recovery and help structures[cite: 1]
+                            let distMarkToHoop = myMark.distanceTo(hoopPos);
+                            
+                            if (ballDistToHoop < 4.8 && distMarkToHoop > 5.5 && Math.random() < 0.6) {
+                                // HELP DEFENSE: Drop down to clog the interior lanes if baseline drives occur[cite: 1]
+                                let helpVector = ballHandlerPos.clone().add(hoopPos).multiplyScalar(0.5);
+                                def.targetPos.copy(helpVector);
+                                def.speedModifier = 2.4;[cite: 1]
                             } else {
-                                def.helpTarget = null;
-                                defTargets[i].copy(myMark).lerp(hoopPos, 0.4);
+                                // RECOVERY: Stick into passing lanes between mark assignment and rim[cite: 1]
+                                def.targetPos.copy(myMark).lerp(hoopPos, 0.28);
+                                def.speedModifier = 2.2;[cite: 1]
                             }
                         }
 
-                        let sMult = 1.0;
-                        teammates.forEach(tm => { if (tm.state === 'screen' && tm.body.position.distanceTo(def.body.position) < 2.0) sMult = 0.05; });
-                        if (i === 1 && teammates[0].state === 'juke') sMult *= 0.15;
-                        if (i === 2 && teammates[1].state === 'juke') sMult *= 0.15;
-                        
-                        let mDir = new THREE.Vector3(defTargets[i].x - def.body.position.x, 0, defTargets[i].z - def.body.position.z);
-                        let dist = mDir.length();
-                        if (dist > 0.1) {
-                            mDir.normalize();
-                            let s = Math.min(dist, redSpeed * sMult);
-                            def.body.position.x += mDir.x * s;
-                            def.body.position.z += mDir.z * s;
-                        }
+                        // Apply structured acceleration weights to the dynamic vector transformations[cite: 1]
+                        def.visualPos.lerp(def.targetPos, def.speedModifier * dt);
+                        def.body.position.copy(def.visualPos);
                         
                         def.body.position.x = Math.max(-14.5, Math.min(14.5, def.body.position.x));
                         def.body.position.z = Math.max(-14.5, Math.min(14.5, def.body.position.z));
                         def.mesh.position.copy(def.body.position);
                     });
                 } else {
+                    // Free Throw scenario handling bounds loops
                     teammates.forEach((tm, idx) => {
                         const tmKey = 'teammate' + idx;
                         if (possession === tmKey && gameState === 'spectating') {
@@ -2658,10 +2662,12 @@
                     });
                 }
 
-                let defenderPos = possession === 'player' ? defenders[0].body.position : (possession === 'teammate0' ? defenders[1].body.position : defenders[2].body.position);
+                // Coverage assessment indexing matching the active handler assignment
+                let activeDefIdx = (possession === 'player') ? 0 : (possession === 'teammate0' ? 1 : 2);
+                let defenderPos = defenders[activeDefIdx].body.position;
                 let bhFlat = new THREE.Vector3(ballHandlerPos.x, 0, ballHandlerPos.z); let defFlat = new THREE.Vector3(defenderPos.x, 0, defenderPos.z); let rimFlat = new THREE.Vector3(0, 0, RIM_Z);
                 const distToAI = bhFlat.distanceTo(defFlat); let dot = rimFlat.clone().sub(bhFlat).normalize().dot(defFlat.clone().sub(bhFlat).normalize());
-                if (dot > 0) { let baseCov = Math.max(0, Math.min(1, 1 - ((distToAI - 1.0) / 2.0))); coverage = baseCov * dot; } else { coverage = 0; }
+                if (dot > 0) { let baseCov = Math.max(0, Math.min(1, 1 - ((distToAI - 1.1) / 2.0))); coverage = baseCov * dot; } else { coverage = 0; }
                 const covPerc = Math.round(coverage * 100); 
                 
                 if (!isFreeThrow) {
@@ -2676,7 +2682,7 @@
                     let shooter = teammates[cpuShooting.tmIdx];
                     if (shooter.isFadeaway && !isFreeThrow) {
                         let awayDir = new THREE.Vector3(shooter.body.position.x, 0, shooter.body.position.z - RIM_Z).normalize();
-                        shooter.body.position.x += awayDir.x * 0.05; shooter.body.position.z += awayDir.z * 0.05;
+                        shooter.targetPos.x += awayDir.x * 0.05; shooter.targetPos.z += awayDir.z * 0.05;
                     }
                     cpuShooting.power += 140 * dt; if (cpuShooting.power >= cpuShooting.target) releaseCpuShot(cpuShooting.tmIdx);
                 }
